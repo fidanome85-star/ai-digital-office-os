@@ -1,33 +1,61 @@
-name: AI Digital Office OS CI
+name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
 
 jobs:
-  test-and-verify:
+  phase1:
     runs-on: ubuntu-latest
-
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ai_office
+          POSTGRES_PASSWORD: ai_office_dev_password
+          POSTGRES_DB: ai_digital_office_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ai_office -d ai_digital_office_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://ai_office:ai_office_dev_password@localhost:5432/ai_digital_office_os
+      APP_DATABASE_URL: postgres://ai_office_app:ai_office_app_dev_password@localhost:5432/ai_digital_office_os
+      AUTH_JWT_ISSUER: https://auth.ai-digital-office-os.local/
+      AUTH_JWT_AUDIENCE: ai-digital-office-os-control-plane
+      AUTH_JWKS_URI: https://auth.ai-digital-office-os.local/.well-known/jwks.json
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
 
-    - name: Run Test Suite
-      run: |
-        python -m unittest discover -s tests -p "test_*.py"
+      - run: pnpm install --frozen-lockfile
 
-    - name: Dry Run Autonomous Pipeline
-      run: |
-        python main.py "CI_CD_VERIFICATION_RUN" "Verify entire agentic factory startup"
+      - name: Run all migrations against a clean database
+        run: pnpm db:migrate
+
+      - name: Typecheck every workspace package
+        run: pnpm typecheck
+
+      - name: Domain-model consistency gate — generated types must match committed types
+        run: |
+          pnpm domain-model:generate
+          git diff --exit-code -- packages/domain-model/src/generated || \
+            (echo "::error::packages/domain-model/src/generated/tables.ts is stale — run 'pnpm domain-model:generate' and commit the result." && exit 1)
+
+      - name: Unit tests (packages/auth)
+        run: pnpm --filter @ai-office/auth run test
+
+      - name: RLS cross-tenant adversarial test
+        run: pnpm test:rls-adversarial

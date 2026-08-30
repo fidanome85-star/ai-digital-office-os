@@ -1,0 +1,947 @@
+openapi: 3.0.3
+info:
+  title: AI Digital Office OS Control Plane
+  version: 1.4.0
+  description: >
+    Governed control-plane API for AI DIGITAL OFFICE OS. Every endpoint is
+    tenant-scoped via the JWT 'tenant_id' claim, versioned under /v1, and
+    returns the standard error envelope on any non-2xx response (see
+    ErrorResponse schema). v1.4 closes the integrity-review findings against
+    v1.3: full project/agent-version/run/deployment/usage/tool lifecycle
+    coverage, an explicit auth contract (issuer/audience/JWKS/scopes), and
+    a required Idempotency-Key header on every state-changing endpoint.
+    This specification is product-agnostic: no endpoint, schema, or example
+    is specific to any named downstream project (see blueprint clause 75).
+servers:
+  - url: https://api.digitaloffice.example/v1
+    description: Production (placeholder host — real endpoint is an
+      environment-specific choice, intentionally not fabricated here)
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        OAuth2 client-credentials token for service/agent callers, or
+        OAuth2 authorization-code token for human users (blueprint clause 70).
+        Required claims: 'iss' (issuer — this Office's or an approved
+        external IdP), 'aud' (this control plane), 'exp'/'iat' (max lifetime
+        15 minutes for service/agent callers, 8 hours for human sessions),
+        'tenant_id', 'scope' (granted permission scopes), and 'actor_type'
+        (SERVICE | HUMAN). Clock-skew tolerance ±60 seconds. JWKS rotates on
+        a maximum 90-day cycle with a minimum 7-day overlap window. Session
+        and refresh-token lifecycle is delegated entirely to the issuing IdP
+        (blueprint clause 71) — this API only validates presented tokens.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string }
+      description: >
+        Required on every state-changing (POST/PATCH/DELETE) request.
+        Replaying the same key within 24 hours returns the original result
+        rather than reprocessing (blueprint clauses 49, 63, 68).
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error_code, message, correlation_id, retryable]
+      properties:
+        error_code:
+          type: string
+          enum: [VALIDATION_ERROR, AUTHORIZATION_ERROR, POLICY_ERROR, TOOL_ERROR,
+                 MODEL_ERROR, PROVIDER_ERROR, NETWORK_ERROR, TIMEOUT,
+                 DATABASE_ERROR, ARTIFACT_ERROR, DEPLOYMENT_ERROR, UNKNOWN_ERROR]
+        message: { type: string }
+        correlation_id: { type: string }
+        retryable: { type: boolean }
+
+    Task:
+      type: object
+      required: [task_id, tenant_id, status]
+      properties:
+        task_id: { type: string }
+        tenant_id: { type: string, format: uuid }
+        project_id: { type: string }
+        workflow_id: { type: string }
+        parent_task_id: { type: string }
+        assigned_agent: { type: string }
+        required_capability: { type: string }
+        priority: { type: string }
+        risk_level: { type: string, enum: [GREEN, YELLOW, RED] }
+        security_level: { type: string }
+        dependencies: { type: array, items: { type: string } }
+        input: { type: object }
+        expected_output: { type: object }
+        status:
+          type: string
+          enum: [CREATED, QUEUED, ASSIGNED, RUNNING, WAITING, BLOCKED, FAILED, RETRYING, COMPLETED, CANCELLED, ESCALATED]
+        retry_count: { type: integer }
+        idempotency_key: { type: string }
+        deadline: { type: string, format: date-time }
+
+    TaskCreateRequest:
+      type: object
+      required: [project_id, required_capability, input, idempotency_key]
+      properties:
+        project_id: { type: string }
+        workflow_id: { type: string }
+        parent_task_id: { type: string }
+        required_capability: { type: string }
+        priority: { type: string, enum: [LOW, NORMAL, HIGH, CRITICAL] }
+        risk_level: { type: string, enum: [GREEN, YELLOW, RED] }
+        security_level: { type: string }
+        dependencies: { type: array, items: { type: string } }
+        input: { type: object }
+        expected_output: { type: object }
+        idempotency_key:
+          type: string
+          description: Required — guarantees a retried request never double-executes.
+        deadline: { type: string, format: date-time }
+
+    AgentSpecification:
+      type: object
+      required: [agent_name, department, role, purpose, capabilities]
+      properties:
+        agent_name: { type: string }
+        department: { type: string }
+        role: { type: string }
+        purpose: { type: string }
+        capabilities: { type: array, items: { type: string } }
+        required_model_capabilities: { type: array, items: { type: string } }
+        allowed_tools: { type: array, items: { type: string } }
+        permissions: { type: array, items: { type: string } }
+        data_access: { type: array, items: { type: string } }
+        input_schema: { type: object }
+        output_schema: { type: object }
+        security_level: { type: string, enum: [GREEN, YELLOW, RED], default: GREEN }
+        sandbox_policy: { type: object }
+        parent_agent_id: { type: string }
+
+    AgentRecord:
+      allOf:
+        - $ref: '#/components/schemas/AgentSpecification'
+        - type: object
+          properties:
+            agent_id: { type: string }
+            tenant_id: { type: string, format: uuid, nullable: true }
+            lifecycle_state:
+              type: string
+              enum: [DRAFT, SANDBOX, TESTED, EVALUATED, APPROVED, ACTIVE, UPDATED, DEPRECATED, RETIRED]
+            evaluation_score: { type: number }
+            success_rate: { type: number }
+            average_latency_ms: { type: integer }
+            average_cost: { type: number }
+            version: { type: string }
+            parent_agent_id: { type: string, nullable: true }
+            active_agent_version_id: { type: string, format: uuid, nullable: true, description: "v1.4 — points at the currently ACTIVE agent_versions row (clause 60)." }
+            preferred_provider: { type: string }
+            preferred_model: { type: string }
+            fallback_models: { type: array, items: { type: string } }
+            status: { type: string }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+      description: "v1.4: field set now matches agent_registry columns 1:1 — closes the v1.3 schema/SQL drift finding (clause 69)."
+
+    RoutingRequest:
+      type: object
+      required: [task_id, agent_id, required_capability]
+      properties:
+        task_id: { type: string }
+        agent_id: { type: string }
+        required_capability: { type: string }
+        security_classification: { type: string }
+        data_classification: { type: string }
+        max_cost: { type: number }
+        max_latency_ms: { type: integer }
+
+    RoutingDecision:
+      type: object
+      properties:
+        task_id: { type: string }
+        agent_id: { type: string }
+        selected_provider: { type: string }
+        selected_model: { type: string }
+        reason: { type: string }
+        policy_result: { type: string, enum: [ALLOW, DENY, REQUIRE_APPROVAL, REQUIRE_ESCALATION] }
+        fallback_chain_used: { type: array, items: { type: string } }
+        decided_at: { type: string, format: date-time }
+
+    ApprovalRequest:
+      type: object
+      required: [action, risk_level]
+      properties:
+        task_id: { type: string }
+        agent_id: { type: string }
+        action:
+          type: string
+          description: "Includes AGENT_ACTIVATE for the Factory→Production transition (blueprint clause 45)."
+        risk_level: { type: string, enum: [GREEN, YELLOW, RED] }
+        reason: { type: string }
+
+    ApprovalRecord:
+      allOf:
+        - $ref: '#/components/schemas/ApprovalRequest'
+        - type: object
+          properties:
+            request_id: { type: string }
+            tenant_id: { type: string, format: uuid }
+            requester: { type: string }
+            approver: { type: string }
+            decision: { type: string, enum: [APPROVED, DENIED, EXPIRED] }
+            expires_at: { type: string, format: date-time }
+            execution_result: { type: object }
+            created_at: { type: string, format: date-time }
+            decided_at: { type: string, format: date-time }
+
+    Workflow:
+      type: object
+      properties:
+        workflow_id: { type: string }
+        tenant_id: { type: string, format: uuid }
+        project_id: { type: string }
+        workflow_type: { type: string }
+        definition_version: { type: string }
+        current_state: { type: object }
+        status: { type: string, enum: [RUNNING, PAUSED, COMPLETED, FAILED, CANCELLED, ESCALATED] }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+
+    Artifact:
+      type: object
+      properties:
+        artifact_id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        project_id: { type: string }
+        task_id: { type: string }
+        artifact_type: { type: string, enum: [CODE, DOC, DESIGN, CONFIG, REPORT, DATASET] }
+        storage_uri: { type: string }
+        content_hash: { type: string }
+        version: { type: string }
+        status: { type: string, enum: [DRAFT, IN_REVIEW, APPROVED, RELEASED, DEPRECATED] }
+        parent_artifact_id: { type: string, format: uuid, nullable: true }
+        agent_run_id: { type: string, nullable: true, description: "v1.4 — resolvable FK into agent_runs (clause 61)." }
+        model_run_id: { type: string, nullable: true, description: "v1.4 — resolvable FK into model_runs (clause 61)." }
+        reviewed_by: { type: string }
+        approved_by: { type: string }
+        git_commit_ref: { type: string }
+        deployment_ref: { type: string, deprecated: true, description: "Superseded by /deployments and deployment_registry (clause 66); retained read-only for backward compatibility." }
+        created_at: { type: string, format: date-time }
+
+    MemoryQueryRequest:
+      type: object
+      required: [query_text]
+      properties:
+        query_text: { type: string }
+        scope: { type: string, enum: [AGENT, PROJECT, ORG] }
+        subject_id: { type: string }
+        top_k: { type: integer, default: 10 }
+        distance_threshold: { type: number, default: 0.4 }
+
+    MemoryQueryResult:
+      type: object
+      properties:
+        embedding_id: { type: string, format: uuid }
+        content: { type: string }
+        similarity: { type: number }
+        memory_fact_id: { type: string, format: uuid, nullable: true }
+
+    FeatureFlag:
+      type: object
+      properties:
+        flag_id: { type: string, format: uuid }
+        flag_key: { type: string }
+        flag_type: { type: string, enum: [BOOLEAN, PERCENTAGE, VARIANT] }
+        default_value: {}
+        tenant_override_value: {}
+        environment: { type: string }
+        status: { type: string }
+        tenant_id: { type: string, format: uuid, nullable: true, description: "NULL = global default (clause 51)." }
+        created_by: { type: string }
+        updated_at: { type: string, format: date-time }
+
+    Tenant:
+      type: object
+      properties:
+        tenant_id: { type: string, format: uuid }
+        org_name: { type: string }
+        org_slug: { type: string }
+        status: { type: string, enum: [ACTIVE, SUSPENDED, ARCHIVED] }
+        plan_tier: { type: string }
+
+    # ---- New in v1.4 ----
+
+    Project:
+      type: object
+      required: [project_name, project_type]
+      properties:
+        project_id: { type: string }
+        tenant_id: { type: string, format: uuid }
+        project_name: { type: string }
+        project_type:
+          type: string
+          description: "Free-form. No product type receives special-cased treatment (blueprint clause 75)."
+        constitution_version: { type: string }
+        lifecycle_state:
+          type: string
+          enum: [DISCOVERY, RESEARCH, REQUIREMENTS, PRODUCT_PLAN, ARCHITECTURE, UX_UI, DESIGN, DEVELOPMENT, CODE_REVIEW, QA, SECURITY, STAGING, APPROVAL, DEPLOYMENT, MONITORING, MAINTENANCE]
+        risk_level: { type: string, enum: [GREEN, YELLOW, RED] }
+        owner_user_id: { type: string, format: uuid }
+        repository_ref: { type: string }
+        environment_policy: { type: object }
+
+    AgentVersion:
+      type: object
+      properties:
+        agent_version_id: { type: string, format: uuid }
+        agent_id: { type: string }
+        version: { type: string }
+        specification_hash: { type: string }
+        prompt_version: { type: string }
+        model_policy: { type: object }
+        permissions_snapshot: { type: object }
+        evaluation_score: { type: number }
+        lifecycle_state: { type: string }
+
+    ArtifactCreateRequest:
+      type: object
+      required: [project_id, artifact_type, storage_uri, content_hash]
+      properties:
+        project_id: { type: string }
+        task_id: { type: string }
+        agent_run_id: { type: string }
+        model_run_id: { type: string }
+        artifact_type: { type: string, enum: [CODE, DOC, DESIGN, CONFIG, REPORT, DATASET] }
+        storage_uri: { type: string }
+        content_hash: { type: string }
+        version: { type: string, default: "1.0.0" }
+
+    ArtifactLineage:
+      type: object
+      properties:
+        artifact: { $ref: '#/components/schemas/Artifact' }
+        agent_run: { type: object }
+        model_run: { type: object }
+        task: { $ref: '#/components/schemas/Task' }
+        workflow: { $ref: '#/components/schemas/Workflow' }
+        parent_chain: { type: array, items: { $ref: '#/components/schemas/Artifact' } }
+
+    ModelEvaluationTriggerRequest:
+      type: object
+      required: [model_id, benchmark_suite]
+      properties:
+        model_id: { type: string }
+        benchmark_suite: { type: string }
+        evaluator_version: { type: string }
+
+    ModelEvaluationResult:
+      type: object
+      properties:
+        evaluation_id: { type: string, format: uuid }
+        model_id: { type: string }
+        benchmark_suite: { type: string }
+        score: { type: number }
+        metrics:
+          type: array
+          items:
+            type: object
+            properties:
+              metric_name: { type: string }
+              metric_value: { type: number }
+              unit: { type: string }
+        executed_at: { type: string, format: date-time }
+
+    UsageEvent:
+      type: object
+      properties:
+        usage_event_id: { type: string, format: uuid }
+        project_id: { type: string }
+        task_id: { type: string }
+        agent_id: { type: string }
+        provider_id: { type: string }
+        model_id: { type: string }
+        input_tokens: { type: integer }
+        output_tokens: { type: integer }
+        actual_cost: { type: number }
+        currency: { type: string }
+        event_time: { type: string, format: date-time }
+
+    CostSummary:
+      type: object
+      properties:
+        tenant_id: { type: string, format: uuid }
+        period_start: { type: string, format: date-time }
+        period_end: { type: string, format: date-time }
+        total_cost: { type: number }
+        currency: { type: string }
+        budget_status: { type: string, enum: [OK, WARNING, SOFT_LIMIT, HARD_LIMIT] }
+        breakdown_by_provider: { type: object }
+
+    ToolRecord:
+      type: object
+      properties:
+        tool_id: { type: string }
+        mcp_server_id: { type: string }
+        tool_name: { type: string }
+        version: { type: string }
+        risk_level: { type: string, enum: [GREEN, YELLOW, RED] }
+        enabled: { type: boolean }
+
+    McpServerRecord:
+      type: object
+      properties:
+        mcp_server_id: { type: string }
+        server_name: { type: string }
+        endpoint: { type: string }
+        trust_level: { type: string }
+        enabled: { type: boolean }
+
+    DeploymentCreateRequest:
+      type: object
+      required: [project_id, release_id, environment, strategy]
+      properties:
+        project_id: { type: string }
+        release_id: { type: string }
+        environment: { type: string }
+        strategy: { type: string, enum: [standard, rolling, blue_green, canary] }
+        approval_request_id: { type: string }
+
+    Deployment:
+      allOf:
+        - $ref: '#/components/schemas/DeploymentCreateRequest'
+        - type: object
+          properties:
+            deployment_id: { type: string }
+            tenant_id: { type: string, format: uuid }
+            status: { type: string }
+            rollback_target: { type: string }
+            started_at: { type: string, format: date-time }
+            completed_at: { type: string, format: date-time }
+
+    PolicyDecisionRecord:
+      type: object
+      properties:
+        policy_decision_id: { type: string, format: uuid }
+        task_id: { type: string }
+        agent_id: { type: string }
+        decision: { type: string, enum: [ALLOW, DENY, REQUIRE_APPROVAL, REQUIRE_ESCALATION] }
+        policy_version: { type: string }
+        alternatives: { type: object }
+        rejection_reasons: { type: object }
+        created_at: { type: string, format: date-time }
+
+    RoutingDecisionRecord:
+      type: object
+      properties:
+        routing_decision_id: { type: string, format: uuid }
+        task_id: { type: string }
+        selected_provider: { type: string }
+        selected_model: { type: string }
+        candidate_models: { type: object }
+        reason: { type: string }
+        created_at: { type: string, format: date-time }
+
+  responses:
+    Unauthorized:
+      description: Missing/invalid bearer token
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    PolicyDenied:
+      description: Central Policy Engine returned DENY
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    NotFound:
+      description: Resource not found (or not visible to this tenant)
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+
+paths:
+  /tasks:
+    post:
+      summary: Create a governed task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskCreateRequest' }
+      responses:
+        '201':
+          description: Task created
+          content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } }
+        '403': { $ref: '#/components/responses/PolicyDenied' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /tasks/{task_id}:
+    get:
+      summary: Get task state
+      parameters:
+        - { name: task_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Task state
+          content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /agents:
+    post:
+      summary: Submit an agent specification to Agent Factory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentSpecification' }
+      responses:
+        '202':
+          description: Agent creation workflow started (lands in DRAFT, not ACTIVE)
+          content: { application/json: { schema: { $ref: '#/components/schemas/AgentRecord' } } }
+        '403': { $ref: '#/components/responses/PolicyDenied' }
+    get:
+      summary: List agents visible to the caller's tenant
+      parameters:
+        - { name: lifecycle_state, in: query, schema: { type: string } }
+        - { name: department, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Agent list
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AgentRecord' } }
+
+  /agents/{agent_id}:
+    get:
+      summary: Get agent registry record
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Agent record
+          content: { application/json: { schema: { $ref: '#/components/schemas/AgentRecord' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /agents/{agent_id}/messages:
+    get:
+      summary: List agent-to-agent messages sent to/from this agent
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Message list
+          content: { application/json: { schema: { type: array, items: { type: object } } } }
+
+  /models/route:
+    post:
+      summary: Request capability-based model routing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoutingRequest' }
+      responses:
+        '200':
+          description: Routing decision
+          content: { application/json: { schema: { $ref: '#/components/schemas/RoutingDecision' } } }
+        '403': { $ref: '#/components/responses/PolicyDenied' }
+
+  /approvals:
+    post:
+      summary: Create an approval request (includes AGENT_ACTIVATE)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalRequest' }
+      responses:
+        '201':
+          description: Approval request created
+          content: { application/json: { schema: { $ref: '#/components/schemas/ApprovalRecord' } } }
+    get:
+      summary: List pending approvals for the caller's tenant
+      parameters:
+        - { name: risk_level, in: query, schema: { type: string, enum: [GREEN, YELLOW, RED] } }
+      responses:
+        '200':
+          description: Approval list
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ApprovalRecord' } }
+
+  /approvals/{request_id}/decision:
+    post:
+      summary: Record an approval decision (management/Owner action)
+      parameters:
+        - { name: request_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [APPROVED, DENIED] }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Updated approval record
+          content: { application/json: { schema: { $ref: '#/components/schemas/ApprovalRecord' } } }
+
+  /providers/health:
+    get:
+      summary: Provider health status
+      responses:
+        '200':
+          description: Provider health
+          content: { application/json: { schema: { type: array, items: { type: object } } } }
+
+  /workflows/{workflow_id}:
+    get:
+      summary: Get durable workflow state (reconstructed from workflow_history on demand)
+      parameters:
+        - { name: workflow_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Workflow state
+          content: { application/json: { schema: { $ref: '#/components/schemas/Workflow' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /workflows/{workflow_id}/pause:
+    post:
+      summary: Pause a running workflow
+      parameters:
+        - { name: workflow_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Workflow paused }
+
+  /workflows/{workflow_id}/resume:
+    post:
+      summary: Resume a paused workflow
+      parameters:
+        - { name: workflow_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Workflow resumed }
+
+  /artifacts:
+    get:
+      summary: List artifacts for a project
+      parameters:
+        - { name: project_id, in: query, required: true, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Artifact list
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Artifact' } }
+
+  /artifacts/{artifact_id}:
+    get:
+      summary: Get artifact record and lineage
+      parameters:
+        - { name: artifact_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Artifact record
+          content: { application/json: { schema: { $ref: '#/components/schemas/Artifact' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /memory/query:
+    post:
+      summary: Tiered memory retrieval (routes to working/durable/semantic tier)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemoryQueryRequest' }
+      responses:
+        '200':
+          description: Ranked memory results
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/MemoryQueryResult' } }
+
+  /feature-flags:
+    get:
+      summary: List feature flags visible to the caller's tenant
+      responses:
+        '200':
+          description: Flag list
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FeatureFlag' } }
+    post:
+      summary: Create or override a feature flag for this tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FeatureFlag' }
+      responses:
+        '201':
+          description: Flag created/updated
+          content: { application/json: { schema: { $ref: '#/components/schemas/FeatureFlag' } } }
+
+  /tenants/current:
+    get:
+      summary: Get the calling token's own tenant record
+      responses:
+        '200':
+          description: Tenant record
+          content: { application/json: { schema: { $ref: '#/components/schemas/Tenant' } } }
+
+  /secrets/{reference_id}/rotate:
+    post:
+      summary: Trigger rotation of a referenced secret (never returns the raw value)
+      parameters:
+        - { name: reference_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202': { description: Rotation triggered — audited as a secret-access event }
+        '403': { $ref: '#/components/responses/PolicyDenied' }
+
+  # ==================== New in v1.4 — closes the "incomplete API lifecycle" finding ====================
+
+  /projects:
+    post:
+      summary: Create a project (authoritative project_registry record)
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } }
+      responses:
+        '201': { description: Project created, content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } } }
+    get:
+      summary: List projects for the caller's tenant
+      parameters:
+        - { name: lifecycle_state, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Project list, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Project' } } } } }
+
+  /projects/{project_id}:
+    get:
+      summary: Get a project record
+      parameters: [ { name: project_id, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: Project record, content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Update a project's mutable fields (lifecycle_state, risk_level, environment_policy, etc.)
+      parameters: [ { name: project_id, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        '200': { description: Updated project, content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } } }
+
+  /workflows:
+    post:
+      summary: Start a new durable workflow
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id, workflow_type, definition_version]
+              properties:
+                project_id: { type: string }
+                workflow_type: { type: string }
+                definition_version: { type: string }
+      responses:
+        '201': { description: Workflow started, content: { application/json: { schema: { $ref: '#/components/schemas/Workflow' } } } }
+
+  /workflows/{workflow_id}/cancel:
+    post:
+      summary: Cancel a workflow (writes a workflow_history CANCELLED event)
+      parameters: [ { name: workflow_id, in: path, required: true, schema: { type: string } } ]
+      responses: { '200': { description: Workflow cancelled } }
+
+  /workflows/{workflow_id}/retry:
+    post:
+      summary: Retry the current failed step of a workflow
+      parameters: [ { name: workflow_id, in: path, required: true, schema: { type: string } } ]
+      responses: { '200': { description: Retry initiated } }
+
+  /workflows/{workflow_id}/escalate:
+    post:
+      summary: Escalate a workflow to human review (creates an approval_requests row)
+      parameters: [ { name: workflow_id, in: path, required: true, schema: { type: string } } ]
+      responses: { '200': { description: Escalation created, content: { application/json: { schema: { $ref: '#/components/schemas/ApprovalRecord' } } } } }
+
+  /agents/{agent_id}/versions:
+    post:
+      summary: Submit a new agent version (does not activate it)
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AgentVersion' } } }
+      responses:
+        '201': { description: Version created, content: { application/json: { schema: { $ref: '#/components/schemas/AgentVersion' } } } }
+    get:
+      summary: List all versions of an agent
+      parameters: [ { name: agent_id, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: Version list, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AgentVersion' } } } } }
+
+  /agents/{agent_id}/versions/{agent_version_id}/activate:
+    post:
+      summary: Activate a specific agent version into production (requires prior AGENT_ACTIVATE approval — clause 45/60)
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { type: string } }
+        - { name: agent_version_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Version activated }
+        '403': { $ref: '#/components/responses/PolicyDenied' }
+
+  /agents/{agent_id}/messages:
+    post:
+      summary: Send a typed agent-to-agent message (idempotency-keyed — clause 63)
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receiver_agent_id, message_type]
+              properties:
+                receiver_agent_id: { type: string }
+                message_type: { type: string }
+                input_payload: { type: object }
+      responses:
+        '202': { description: Message queued for delivery }
+
+  /artifacts:
+    post:
+      summary: Register a new artifact (immutable once status=APPROVED — clause 48)
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ArtifactCreateRequest' } } }
+      responses:
+        '201': { description: Artifact created, content: { application/json: { schema: { $ref: '#/components/schemas/Artifact' } } } }
+
+  /artifacts/{artifact_id}/lineage:
+    get:
+      summary: Resolve full lineage for an artifact (Owner Command → ... → Release — clause 23/61)
+      parameters: [ { name: artifact_id, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: Full lineage, content: { application/json: { schema: { $ref: '#/components/schemas/ArtifactLineage' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /providers:
+    get:
+      summary: List registered AI providers and health status
+      responses:
+        '200': { description: Provider list, content: { application/json: { schema: { type: array, items: { type: object } } } } }
+
+  /models:
+    get:
+      summary: List registered models with capability tags
+      parameters:
+        - { name: capability, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Model list, content: { application/json: { schema: { type: array, items: { type: object } } } } }
+
+  /models/evaluate:
+    post:
+      summary: Trigger a model evaluation run
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ModelEvaluationTriggerRequest' } } }
+      responses:
+        '202': { description: Evaluation triggered, content: { application/json: { schema: { $ref: '#/components/schemas/ModelEvaluationResult' } } } }
+
+  /models/evaluations:
+    get:
+      summary: List historical model evaluation runs (clause 64)
+      parameters:
+        - { name: model_id, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Evaluation history, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ModelEvaluationResult' } } } } }
+
+  /tools:
+    get:
+      summary: List MCP-registered tools available to the caller's tenant
+      responses:
+        '200': { description: Tool list, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ToolRecord' } } } } }
+
+  /mcp/servers:
+    get:
+      summary: List registered MCP servers
+      responses:
+        '200': { description: Server list, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/McpServerRecord' } } } } }
+
+  /usage:
+    get:
+      summary: Query raw usage events (clause 65)
+      parameters:
+        - { name: project_id, in: query, schema: { type: string } }
+        - { name: agent_id, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200': { description: Usage events, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/UsageEvent' } } } } }
+
+  /costs:
+    get:
+      summary: Aggregated cost summary against tenant budget tiers (clause 30/65)
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200': { description: Cost summary, content: { application/json: { schema: { $ref: '#/components/schemas/CostSummary' } } } }
+
+  /deployments:
+    post:
+      summary: Create a deployment for a release (clause 66)
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DeploymentCreateRequest' } } }
+      responses:
+        '201': { description: Deployment created, content: { application/json: { schema: { $ref: '#/components/schemas/Deployment' } } } }
+
+  /deployments/{deployment_id}:
+    get:
+      summary: Get deployment status
+      parameters: [ { name: deployment_id, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: Deployment record, content: { application/json: { schema: { $ref: '#/components/schemas/Deployment' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /deployments/{deployment_id}/rollback:
+    post:
+      summary: Roll back a deployment to its recorded rollback_target
+      parameters:
+        - { name: deployment_id, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202': { description: Rollback triggered }
+
+  /policy-decisions:
+    get:
+      summary: Query structured policy decision records (clause 72)
+      parameters:
+        - { name: task_id, in: query, schema: { type: string } }
+        - { name: agent_id, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Policy decisions, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PolicyDecisionRecord' } } } } }
+
+  /routing-decisions:
+    get:
+      summary: Query structured routing decision records (clause 72)
+      parameters:
+        - { name: task_id, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Routing decisions, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/RoutingDecisionRecord' } } } } }

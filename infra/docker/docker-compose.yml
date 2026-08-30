@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ai-office-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ai_office
+      POSTGRES_PASSWORD: ai_office_dev_password
+      POSTGRES_DB: ai_digital_office_os
+    ports:
+      - "5432:5432"
+    volumes:
+      - ai-office-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_office -d ai_digital_office_os"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ai-office-pgdata:
