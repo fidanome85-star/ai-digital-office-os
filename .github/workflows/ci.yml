@@ -80,3 +80,15 @@ jobs:
 
       - name: workflow-engine tests (durable step execution, resumability, pause)
         run: pnpm --filter @ai-office/workflow-engine run test
+
+      - name: memory-service tests (tiered memory + real pgvector semantic search)
+        run: pnpm --filter @ai-office/memory-service run test
+
+      - name: cost-usage-service tests (real budget_status against budget_tiers)
+        run: pnpm --filter @ai-office/cost-usage-service run test
+
+      - name: deployment-orchestrator tests (health-checked advance/rollback)
+        run: pnpm --filter @ai-office/deployment-orchestrator run test
+
+      - name: policy-engine-service tests (policy CRUD + approval expiry)
+        run: pnpm --filter @ai-office/policy-engine-service run test

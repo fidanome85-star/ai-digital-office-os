@@ -96,6 +96,27 @@ marked VERIFIED without the command that proves it.
 | Cross-service reuse: model-router-gateway and tool-gateway-mcp as real dependencies, not reimplemented | VERIFIED | `services/workflow-engine/package.json` depends on both; `execute-step.ts` calls `executeModelRun`/`callTool` directly |
 | CI runs the full test suite (Phases 1–5) on every push | TEST REQUIRED | `.github/workflows/ci.yml` updated; same "not yet observed on GitHub's runners" caveat as Phases 1–4 |
 
+## Phase 6 — services/memory-service, services/cost-usage-service, services/deployment-orchestrator, services/policy-engine-service
+
+| Item | Status | Evidence |
+|---|---|---|
+| `budget_tiers` table (closes Phase 2's "GET /costs always returned OK" gap) | VERIFIED | `pnpm db:migrate` — migration 0024 applied with RLS (`tenant_isolation_budget_tiers`), domain-model regenerated to 43 tables |
+| Working memory (Tier 1): set/get/purge with TTL enforced at read time | VERIFIED | `pnpm --filter @ai-office/memory-service run test` — `getWorkingMemory` returns `null` once `expires_at` has passed, no cron required for correctness |
+| Fact memory (Tier 2): remember/recall via text search | VERIFIED | same suite — `recallFacts` ILIKE-matches real seeded rows |
+| Semantic memory (Tier 3): real pgvector cosine-distance search, not a stub | VERIFIED | same suite — mathematically-controlled unit vectors prove `embedding <=> $1::vector` ranks a near-orthogonal vector (cosine sim ≈0) below a close one (≈0.9988), scoped by `embedding_model` so incompatible embedding spaces never mix |
+| OpenAI embeddings adapter: real `/v1/embeddings` request/response shape | VERIFIED against mock server | same suite |
+| No fake "local" embedding adapter | VERIFIED by construction | deliberately not built — a hash-based fake would produce similarity scores that look real but mean nothing; see ADR 0006 §1 |
+| `getCostSummary`: real OK → WARNING → SOFT_LIMIT → HARD_LIMIT progression against `budget_tiers` | VERIFIED | `pnpm --filter @ai-office/cost-usage-service run test` — full progression exercised against real seeded `usage_events`; returns `budgetTier: null` + `OK` (not a fabricated pass) when no tier is configured |
+| `upsertBudgetTier` validates `period` | VERIFIED | same suite — rejects a period outside `{DAILY, MONTHLY}` with `CostUsageError("INVALID_PERIOD", …)` |
+| Deployment health-check: real HTTP GET, never throws, timeout via `AbortController` | VERIFIED against mock server | `pnpm --filter @ai-office/deployment-orchestrator run test` — `advanceDeployment` transitions `IN_PROGRESS`→`HEALTHY` on 2xx, →`FAILED` on a real 503 response |
+| `advanceDeployment` refuses a non-`IN_PROGRESS` deployment; unknown id fails clearly | VERIFIED | same suite — `INVALID_STATE` / `NOT_FOUND` |
+| Rollback creates a new deployment row targeting `rollback_target` and only marks the original `ROLLED_BACK` once the new one is confirmed healthy | VERIFIED | same suite — a rollback whose own health check fails leaves the original deployment's status completely untouched, proven by asserting it stays `HEALTHY` rather than flipping to `ROLLED_BACK` |
+| Every deployment outcome audited | VERIFIED | same suite — `audit_events` rows for `DEPLOYMENT_HEALTHY`/`DEPLOYMENT_FAILED` asserted directly |
+| `upsertPolicy` validates rules via `@ai-office/policy-engine`'s own parser before writing (4th real consumer of policy-engine) | VERIFIED | `pnpm --filter @ai-office/policy-engine-service run test` — a rule with `riskLevel: "PURPLE"` is rejected with `PolicyEngineServiceError("INVALID_RULES", …)` and nothing is written to `policy_registry` |
+| Every tenant policy write goes through RLS (no NULL-tenant global default can be created by this service) | VERIFIED by construction | `WITH CHECK (tenant_id::text = current_setting(...))` on `policy_registry` makes a NULL-tenant insert through the app role impossible; only the migration-owner role can seed global defaults — see ADR 0006 §2 |
+| `expirePendingApprovals` sweeps overdue undecided approvals to `EXPIRED` (closes a real OpenAPI enum gap — `EXPIRED` existed in `ApprovalRecord.decision` but nothing ever set it) | VERIFIED | same suite — an expired-but-undecided row flips to `EXPIRED`; a still-pending row and an already-`APPROVED` row are both left untouched by the same sweep |
+| CI runs the full test suite (Phases 1–6) on every push | TEST REQUIRED | `.github/workflows/ci.yml` updated with all four new services' test steps; same "not yet observed green on GitHub's runners" caveat as every prior phase (see note at the bottom) |
+
 ## What has NOT been built yet
 
 - No live call has been made against a real hosted LLM provider or a real
@@ -126,12 +147,31 @@ marked VERIFIED without the command that proves it.
 - `release_registry` has no creation endpoint in the v1.4 OpenAPI contract
   — `POST /deployments` requires one to already exist (a gap in the spec
   itself, documented rather than silently worked around; see ADR 0002 §5).
+- No live call has been made against a real OpenAI embeddings endpoint —
+  same "no credentials in this environment by design" posture as Phase 4's
+  model/tool adapters (ADR 0004 §1); the adapter needs no code changes to
+  support it.
+- No live deployment infrastructure exists to health-check — every
+  `deployment-orchestrator` test points `HttpHealthChecker` at a local mock
+  server, same pattern as every network-touching adapter since Phase 4.
+- Neither `expirePendingApprovals` nor `purgeExpiredWorkingMemory` is wired
+  to a scheduler — both are correct, tenant-scoped, callable sweeps, but
+  nothing in this repo invokes them periodically yet (see ADR 0006 §3).
+- `services/memory-service`, `services/cost-usage-service`,
+  `services/deployment-orchestrator`, and `services/policy-engine-service`
+  are library packages only — none of them expose an HTTP API of their own
+  yet. control-plane-api's Phase 2 endpoints (`/memory/*`, `/costs`,
+  `/deployments/*`, `/policies` if added) would need to be wired to call
+  into these packages to expose the new functionality over HTTP; that
+  wiring has not been done in this phase.
 
 ## Next phase
 
-**Phase 6 — `services/memory-service`, `services/cost-usage-service`,
-`services/deployment-orchestrator`, `services/policy-engine-service`**:
-the remaining build-order-8 services. Memory-service is the natural place
-to finally give control-plane-api's `/memory/query` (Phase 2 placeholder)
-real semantic search over `memory_embeddings` — still bounded by the same
-"no live embedding provider" honesty constraint until credentials exist.
+All eight build-order services from the implementation scaffold now exist
+with real, tested logic. What remains is integration work, not new
+services: wiring control-plane-api's existing route handlers to actually
+call into memory-service/cost-usage-service/deployment-orchestrator/
+policy-engine-service instead of their Phase 2 placeholders, adding a
+scheduler for the two sweep functions, and — whenever real provider
+credentials become available — exercising the model/embedding/MCP adapters
+against live endpoints for the first time.

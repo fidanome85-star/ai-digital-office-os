@@ -186,6 +186,90 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  services/cost-usage-service:
+    dependencies:
+      '@ai-office/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@ai-office/domain-model':
+        specifier: workspace:*
+        version: link:../../packages/domain-model
+      '@ai-office/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      pg:
+        specifier: ^8.12.0
+        version: 8.23.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.14.0
+        version: 20.19.43
+      '@types/pg':
+        specifier: ^8.11.6
+        version: 8.23.1
+      tsx:
+        specifier: ^4.16.0
+        version: 4.23.13
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
+  services/deployment-orchestrator:
+    dependencies:
+      '@ai-office/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@ai-office/domain-model':
+        specifier: workspace:*
+        version: link:../../packages/domain-model
+      '@ai-office/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      pg:
+        specifier: ^8.12.0
+        version: 8.23.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.14.0
+        version: 20.19.43
+      '@types/pg':
+        specifier: ^8.11.6
+        version: 8.23.1
+      tsx:
+        specifier: ^4.16.0
+        version: 4.23.13
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
+  services/memory-service:
+    dependencies:
+      '@ai-office/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@ai-office/domain-model':
+        specifier: workspace:*
+        version: link:../../packages/domain-model
+      '@ai-office/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      pg:
+        specifier: ^8.12.0
+        version: 8.23.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.14.0
+        version: 20.19.43
+      '@types/pg':
+        specifier: ^8.11.6
+        version: 8.23.1
+      tsx:
+        specifier: ^4.16.0
+        version: 4.23.13
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
   services/model-router-gateway:
     dependencies:
       '@ai-office/db':
@@ -197,6 +281,37 @@ importers:
       '@ai-office/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      pg:
+        specifier: ^8.12.0
+        version: 8.23.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.14.0
+        version: 20.19.43
+      '@types/pg':
+        specifier: ^8.11.6
+        version: 8.23.1
+      tsx:
+        specifier: ^4.16.0
+        version: 4.23.13
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
+  services/policy-engine-service:
+    dependencies:
+      '@ai-office/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@ai-office/domain-model':
+        specifier: workspace:*
+        version: link:../../packages/domain-model
+      '@ai-office/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@ai-office/policy-engine':
+        specifier: workspace:*
+        version: link:../../packages/policy-engine
       pg:
         specifier: ^8.12.0
         version: 8.23.0
