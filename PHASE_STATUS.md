@@ -64,19 +64,44 @@ marked VERIFIED without the command that proves it.
 | APPROVED → ACTIVE (human `AGENT_ACTIVATE` governance) | VERIFIED (Phase 2, unchanged) | agent-factory does not duplicate or bypass this — see ADR 0003 §1 |
 | CI runs the full test suite (Phases 1–3) on every push | TEST REQUIRED | `.github/workflows/ci.yml` updated; same "not yet observed on GitHub's runners" caveat as Phases 1–2 |
 
+## Phase 4 — services/model-router-gateway, services/tool-gateway-mcp
+
+| Item | Status | Evidence |
+|---|---|---|
+| OpenAI adapter: real request shape, auth header, response parsing | VERIFIED against mock server | `pnpm --filter @ai-office/model-router-gateway run test` — sends correct `/chat/completions` body and `Bearer` header, parses `choices[0].message.content` + token usage, maps 429→retryable `RATE_LIMITED`, malformed body→`INVALID_RESPONSE` |
+| Anthropic adapter: real request shape, auth header, response parsing | VERIFIED against mock server | same suite — `x-api-key`/`anthropic-version` headers, `/messages` body shape, 500→retryable `PROVIDER_ERROR` |
+| Gemini adapter: real request shape, auth header, response parsing | VERIFIED against mock server | same suite — `x-goog-api-key` header, `:generateContent` path, 401→non-retryable `PROVIDER_ERROR` |
+| Local adapter: fully offline, deterministic, zero network calls | VERIFIED | same suite — no mock server involved at all |
+| Live call against a real hosted provider (OpenAI/Anthropic/Gemini) | TARGET | no API key configured in this environment by design — see ADR 0004 §1; adapter code needs no changes to support it |
+| `executeModelRun`: provider/model lookup → model_runs → secret resolution → adapter call (with retry) → model_runs/usage_events update | VERIFIED | same suite — real Postgres, mock HTTP server for the `openai-chat` case, real cost computed from `cost_profile` (0.0007 for 10 input + 20 output tokens at $0.01/$0.03 per 1k) |
+| A failed model run still leaves a `FAILED` model_runs row, not a lost attempt | VERIFIED | same suite — unsupported `adapter_type` case |
+| Exponential-backoff retry, retryable vs. non-retryable errors respected | VERIFIED | `withRetry` — 4/4, including "stops at maxAttempts" and "does not retry a non-retryable error" |
+| MCP client: real JSON-RPC 2.0 (`initialize`/`tools/list`/`tools/call`) over HTTP | VERIFIED against mock server | `pnpm --filter @ai-office/tool-gateway-mcp run test` — request id increments correctly, JSON-RPC `error` object → `MCP_PROTOCOL_ERROR`, unreachable server → retryable `MCP_UNREACHABLE` |
+| agent_tool_bindings enforced as a hard gate (no binding = no access) | VERIFIED | same suite — no binding row, and binding-without-the-requested-action, both rejected with `BINDING_DENIED` |
+| Tool calls policy-gated by risk_level (3rd real service using policy-engine) | VERIFIED | same suite — a RED-risk tool is blocked with `POLICY_BLOCKED`; the `REQUIRE_ESCALATION` decision is still recorded in `policy_decision_records` even though the call itself never reaches the MCP server |
+| Every outcome (executed/blocked/failed) audited | VERIFIED | same suite — `audit_events` rows for `TOOL_CALL_EXECUTED`, `TOOL_CALL_BLOCKED`, `TOOL_CALL_FAILED` all asserted directly |
+| Live call against a real MCP server | TARGET | no MCP server available in this environment by design — see ADR 0004 §5; client code needs no changes to support it |
+| CI runs the full test suite (Phases 1–4) on every push | TEST REQUIRED | `.github/workflows/ci.yml` updated; same "not yet observed on GitHub's runners" caveat as Phases 1–3 |
+
 ## What has NOT been built yet
 
-- No agent actually executes a task — no LLM provider call, no prompt sent
-  anywhere. Agent-factory's pipeline governs the agent *specification's*
-  lifecycle (is it well-formed, is it worth reviewing); running agent
-  against real work is `services/workflow-engine` +
-  `services/model-router-gateway` (build-order steps 6–7).
+- No agent actually executes a multi-step task end to end — `executeModelRun`
+  and `callTool` are real, tested, callable building blocks, but nothing
+  yet orchestrates "agent receives a task → calls a model → calls a tool →
+  produces an artifact" as one durable flow. That's
+  `services/workflow-engine` (build-order step 7), the natural first
+  caller of both.
+- No live call has been made against a real hosted LLM provider or a real
+  MCP server anywhere in this repo — by explicit choice this phase (see
+  ADR 0004), not a limitation of the adapter/client code itself.
 - `packages/shared-types` is still empty scaffolding (its `README.md`
   only) — small cross-cutting types not yet needed by anything built so
   far.
 - The evaluation score in `services/agent-factory/src/scoring.ts` is a
   specification-completeness heuristic, not a real capability evaluation —
   same honesty discipline as Phase 2's `/models/evaluate` placeholder.
+  Now that `executeModelRun` exists, a future phase could replace it with
+  a real evaluation that actually calls a model — still not done here.
 - No production secrets, IaC, or deployment topology (explicitly out of
   scope per blueprint clause 74 and the scaffold's own "what NOT to build
   here").
@@ -88,9 +113,9 @@ marked VERIFIED without the command that proves it.
 
 ## Next phase
 
-**Phase 4 — `services/model-router-gateway` and `services/tool-gateway-mcp`**:
-provider/model routing and MCP tool-binding enforcement. This is the point
-where agent-factory's rule-based `/models/route` (Phase 2) and completeness
-scoring (Phase 3) get replaced with something backed by a real provider
-adapter — the natural next place the "documented placeholder" list above
-starts shrinking rather than growing.
+**Phase 5 — `services/workflow-engine`**: durable, replayable multi-step
+workflow execution (per `workflow_history`'s append-only event log design
+from Phase 1) — the orchestrator that actually chains task → model call
+→ tool call → artifact into one governed flow, using
+`model-router-gateway` and `tool-gateway-mcp` as building blocks for the
+first time.

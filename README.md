@@ -5,12 +5,14 @@ model router, workflow engine, and policy engine for running governed AI
 agents inside an organization. Specification: `docs/blueprint/` (v1.4
 consolidated master + integrity review + acceptance checklist).
 
-**Status: Phase 3 of 9 complete.** See `PHASE_STATUS.md` for exactly what
+**Status: Phase 4 of 9 complete.** See `PHASE_STATUS.md` for exactly what
 is built, tested and verified versus what is still a TARGET. The control
-plane is a real, tested, RLS-enforced HTTP API, and agent specifications
-now move through a real, offline-first, policy-gated lifecycle pipeline —
-but no agent actually *executes a task* yet (that needs a real model
-provider, which is Phase 4 onward).
+plane is a real, tested, RLS-enforced HTTP API; agent specifications move
+through a real, offline-first, policy-gated lifecycle pipeline; and real
+provider adapters (OpenAI, Anthropic, Gemini, local) and a real MCP client
+now exist, tested against local mock servers — no live API key or MCP
+server has been wired in yet (a deliberate choice, see `docs/decisions/0004`),
+and nothing yet orchestrates them into one multi-step agent run (Phase 5).
 
 ## Build order
 
@@ -23,10 +25,10 @@ order"), one phase at a time, each verified before the next starts:
 3. **`packages/auth`**, **`packages/observability`**, **`packages/policy-engine`** — ✅ done
 4. **`services/control-plane-api`** — ✅ done (all 40 paths / 48 operations)
 5. **`services/agent-factory`** — ✅ done (DRAFT → SANDBOX → TESTED → EVALUATED → APPROVED)
-6. **`services/model-router-gateway`**, **`services/tool-gateway-mcp`** — not started
+6. **`services/model-router-gateway`**, **`services/tool-gateway-mcp`** — ✅ done (adapters/client tested against mock servers, no live provider/MCP server wired in yet)
 7. **`services/workflow-engine`** — not started
 8. **`services/memory-service`**, **`services/cost-usage-service`**, **`services/deployment-orchestrator`**, **`services/policy-engine-service`** — not started
-9. **`tests/rls-adversarial`** (full suite), **`tests/acceptance`** — partial (smoke-level RLS test + control-plane-api golden path + agent-factory pipeline tests)
+9. **`tests/rls-adversarial`** (full suite), **`tests/acceptance`** — partial (smoke-level RLS test + control-plane-api golden path + agent-factory/model-router/tool-gateway integration tests)
 
 ## Local development
 
@@ -45,6 +47,8 @@ pnpm --filter @ai-office/policy-engine run test
 pnpm test:rls-adversarial      # requires APP_DATABASE_URL (the ai_office_app role, not the owner)
 pnpm --filter @ai-office/control-plane-api run test   # golden path + OpenAPI coverage + tenant isolation
 pnpm --filter @ai-office/agent-factory run test        # lifecycle pipeline, real Postgres
+pnpm --filter @ai-office/model-router-gateway run test # provider adapters vs. mock servers + real execution
+pnpm --filter @ai-office/tool-gateway-mcp run test      # MCP client vs. mock server + binding/policy enforcement
 
 # run the control plane locally:
 AUTH_JWT_ISSUER=... AUTH_JWT_AUDIENCE=... AUTH_JWKS_URI=... \
@@ -53,6 +57,13 @@ AUTH_JWT_ISSUER=... AUTH_JWT_AUDIENCE=... AUTH_JWKS_URI=... \
 # advance one agent through the automated pipeline (DRAFT -> ... -> APPROVED):
 pnpm --filter @ai-office/agent-factory run process -- <tenantId> <agentId>
 ```
+
+To point `services/model-router-gateway` at a real provider instead of
+`local-echo`, set `provider_registry.adapter_type` to `openai-chat` /
+`anthropic-messages` / `google-gemini`, add a matching
+`secrets_vault_references` row with `vault_path = 'env:YOUR_VAR_NAME'`, and
+set `YOUR_VAR_NAME` in the environment — no code changes needed (see
+`docs/decisions/0004-phase-4-implementation-choices.md`).
 
 If Docker isn't available in your environment, point `DATABASE_URL` /
 `APP_DATABASE_URL` at any local Postgres 16+ with the `pgvector` and

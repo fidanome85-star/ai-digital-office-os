@@ -71,3 +71,9 @@ jobs:
 
       - name: agent-factory pipeline integration tests
         run: pnpm --filter @ai-office/agent-factory run test
+
+      - name: model-router-gateway tests (adapters against mock providers + real execution)
+        run: pnpm --filter @ai-office/model-router-gateway run test
+
+      - name: tool-gateway-mcp tests (MCP client + binding/policy enforcement)
+        run: pnpm --filter @ai-office/tool-gateway-mcp run test
