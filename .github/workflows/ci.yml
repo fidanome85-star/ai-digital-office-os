@@ -77,3 +77,6 @@ jobs:
 
       - name: tool-gateway-mcp tests (MCP client + binding/policy enforcement)
         run: pnpm --filter @ai-office/tool-gateway-mcp run test
+
+      - name: workflow-engine tests (durable step execution, resumability, pause)
+        run: pnpm --filter @ai-office/workflow-engine run test

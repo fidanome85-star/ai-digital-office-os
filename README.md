@@ -5,14 +5,15 @@ model router, workflow engine, and policy engine for running governed AI
 agents inside an organization. Specification: `docs/blueprint/` (v1.4
 consolidated master + integrity review + acceptance checklist).
 
-**Status: Phase 4 of 9 complete.** See `PHASE_STATUS.md` for exactly what
+**Status: Phase 5 of 9 complete.** See `PHASE_STATUS.md` for exactly what
 is built, tested and verified versus what is still a TARGET. The control
 plane is a real, tested, RLS-enforced HTTP API; agent specifications move
-through a real, offline-first, policy-gated lifecycle pipeline; and real
-provider adapters (OpenAI, Anthropic, Gemini, local) and a real MCP client
-now exist, tested against local mock servers — no live API key or MCP
-server has been wired in yet (a deliberate choice, see `docs/decisions/0004`),
-and nothing yet orchestrates them into one multi-step agent run (Phase 5).
+through a real, offline-first, policy-gated lifecycle pipeline; real
+provider adapters and a real MCP client exist, tested against local mock
+servers; and workflow-engine now durably chains them — model call → tool
+call → artifact — into one replayable, resumable, pausable multi-step
+flow. No live API key or MCP server has been wired in yet (a deliberate
+choice, see `docs/decisions/0004`).
 
 ## Build order
 
@@ -26,9 +27,9 @@ order"), one phase at a time, each verified before the next starts:
 4. **`services/control-plane-api`** — ✅ done (all 40 paths / 48 operations)
 5. **`services/agent-factory`** — ✅ done (DRAFT → SANDBOX → TESTED → EVALUATED → APPROVED)
 6. **`services/model-router-gateway`**, **`services/tool-gateway-mcp`** — ✅ done (adapters/client tested against mock servers, no live provider/MCP server wired in yet)
-7. **`services/workflow-engine`** — not started
+7. **`services/workflow-engine`** — ✅ done (durable, replayable, resumable, pausable multi-step execution)
 8. **`services/memory-service`**, **`services/cost-usage-service`**, **`services/deployment-orchestrator`**, **`services/policy-engine-service`** — not started
-9. **`tests/rls-adversarial`** (full suite), **`tests/acceptance`** — partial (smoke-level RLS test + control-plane-api golden path + agent-factory/model-router/tool-gateway integration tests)
+9. **`tests/rls-adversarial`** (full suite), **`tests/acceptance`** — partial (smoke-level RLS test + control-plane-api golden path + agent-factory/model-router/tool-gateway/workflow-engine integration tests)
 
 ## Local development
 
@@ -49,6 +50,7 @@ pnpm --filter @ai-office/control-plane-api run test   # golden path + OpenAPI co
 pnpm --filter @ai-office/agent-factory run test        # lifecycle pipeline, real Postgres
 pnpm --filter @ai-office/model-router-gateway run test # provider adapters vs. mock servers + real execution
 pnpm --filter @ai-office/tool-gateway-mcp run test      # MCP client vs. mock server + binding/policy enforcement
+pnpm --filter @ai-office/workflow-engine run test       # durable step execution, resumability, pause
 
 # run the control plane locally:
 AUTH_JWT_ISSUER=... AUTH_JWT_AUDIENCE=... AUTH_JWKS_URI=... \

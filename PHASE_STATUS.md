@@ -83,17 +83,33 @@ marked VERIFIED without the command that proves it.
 | Live call against a real MCP server | TARGET | no MCP server available in this environment by design — see ADR 0004 §5; client code needs no changes to support it |
 | CI runs the full test suite (Phases 1–4) on every push | TEST REQUIRED | `.github/workflows/ci.yml` updated; same "not yet observed on GitHub's runners" caveat as Phases 1–3 |
 
+## Phase 5 — services/workflow-engine (durable multi-step execution)
+
+| Item | Status | Evidence |
+|---|---|---|
+| `workflow_history` is replayed as the actual source of truth, not just written | VERIFIED | `pnpm --filter @ai-office/workflow-engine run test` — `replayState()` folds every event in `sequence_no` order; `runNextStep` consults only that, never a cached in-memory value |
+| End-to-end: model_call → tool_call → create_artifact reaches COMPLETED | VERIFIED | same suite — real Postgres, `local-echo` adapter, real mock MCP server; `workflow_history` shows the exact expected event sequence (STARTED, 3×[STEP_STARTED, STEP_COMPLETED], COMPLETED); a real artifact_registry row is created with a real SHA-256 `content_hash` |
+| Resumability after a simulated crash — a completed step is never re-run | VERIFIED | same suite — runs step 1, then calls `runToCompletion` as a fresh "resume"; asserts (by counting actual mock-server invocations) the tool step ran exactly once total, and exactly one `STEP_COMPLETED` event exists for the first step |
+| Concurrent pause (as issued by control-plane-api's `POST /workflows/{id}/pause`) is honored with zero coupling | VERIFIED | same suite — flips `workflow_registry.status` to `PAUSED` directly (the same statement that endpoint runs) between two `runNextStep` calls; the next call stops immediately; flipping back to `RUNNING` resumes at the correct next step |
+| A step failure stops the workflow at FAILED without attempting later steps | VERIFIED | same suite — a RED-risk tool call is policy-blocked by tool-gateway-mcp; the workflow ends `FAILED`; the second step's id never appears anywhere in `workflow_history` |
+| Unknown workflow_id fails clearly | VERIFIED | same suite — `WorkflowEngineError` with code `NOT_FOUND` |
+| Cross-service reuse: model-router-gateway and tool-gateway-mcp as real dependencies, not reimplemented | VERIFIED | `services/workflow-engine/package.json` depends on both; `execute-step.ts` calls `executeModelRun`/`callTool` directly |
+| CI runs the full test suite (Phases 1–5) on every push | TEST REQUIRED | `.github/workflows/ci.yml` updated; same "not yet observed on GitHub's runners" caveat as Phases 1–4 |
+
 ## What has NOT been built yet
 
-- No agent actually executes a multi-step task end to end — `executeModelRun`
-  and `callTool` are real, tested, callable building blocks, but nothing
-  yet orchestrates "agent receives a task → calls a model → calls a tool →
-  produces an artifact" as one durable flow. That's
-  `services/workflow-engine` (build-order step 7), the natural first
-  caller of both.
 - No live call has been made against a real hosted LLM provider or a real
-  MCP server anywhere in this repo — by explicit choice this phase (see
-  ADR 0004), not a limitation of the adapter/client code itself.
+  MCP server anywhere in this repo — by explicit choice starting Phase 4
+  (see ADR 0004), not a limitation of the adapter/client code itself.
+  workflow-engine inherits the same posture (ADR 0005 §5).
+- The step vocabulary is intentionally minimal (`model_call`, `tool_call`,
+  `create_artifact`) — no conditional branching, fan-out/fan-in, or a
+  `wait_for_approval` step that blocks on `approval_requests`. Additive
+  when needed; see ADR 0005 "Consequences."
+- No scheduler sweeps workflows stuck mid-step (a `STEP_STARTED` with no
+  matching `STEP_COMPLETED`/`STEP_FAILED`, e.g. from a process that died
+  mid-call) and automatically retries them — the event itself is recorded
+  and replay-visible, but nothing acts on it yet.
 - `packages/shared-types` is still empty scaffolding (its `README.md`
   only) — small cross-cutting types not yet needed by anything built so
   far.
@@ -113,9 +129,9 @@ marked VERIFIED without the command that proves it.
 
 ## Next phase
 
-**Phase 5 — `services/workflow-engine`**: durable, replayable multi-step
-workflow execution (per `workflow_history`'s append-only event log design
-from Phase 1) — the orchestrator that actually chains task → model call
-→ tool call → artifact into one governed flow, using
-`model-router-gateway` and `tool-gateway-mcp` as building blocks for the
-first time.
+**Phase 6 — `services/memory-service`, `services/cost-usage-service`,
+`services/deployment-orchestrator`, `services/policy-engine-service`**:
+the remaining build-order-8 services. Memory-service is the natural place
+to finally give control-plane-api's `/memory/query` (Phase 2 placeholder)
+real semantic search over `memory_embeddings` — still bounded by the same
+"no live embedding provider" honesty constraint until credentials exist.
