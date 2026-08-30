@@ -5,10 +5,10 @@ model router, workflow engine, and policy engine for running governed AI
 agents inside an organization. Specification: `docs/blueprint/` (v1.4
 consolidated master + integrity review + acceptance checklist).
 
-**Status: Phase 1 of 9 complete.** See `PHASE_STATUS.md` for exactly what
-is built, tested and verified versus what is still a TARGET. Nothing below
-Phase 1 in the build order exists as running code yet — this repo does not
-yet run an agent.
+**Status: Phase 2 of 9 complete.** See `PHASE_STATUS.md` for exactly what
+is built, tested and verified versus what is still a TARGET. The control
+plane is a real, tested, RLS-enforced HTTP API now — but no agent actually
+*executes* anything yet (that's Phase 3 onward).
 
 ## Build order
 
@@ -19,12 +19,12 @@ order"), one phase at a time, each verified before the next starts:
 1. **`packages/db`** — schema + migrations ✅ done
 2. **`packages/domain-model`** — canonical types generated from the schema ✅ done
 3. **`packages/auth`** (+ observability, policy-engine) — auth ✅ done, the other two still empty scaffolding
-4. **`services/control-plane-api`** — not started
+4. **`services/control-plane-api`** — ✅ done (all 40 paths / 48 operations)
 5. **`services/agent-factory`** — not started
 6. **`services/model-router-gateway`**, **`services/tool-gateway-mcp`** — not started
 7. **`services/workflow-engine`** — not started
 8. **`services/memory-service`**, **`services/cost-usage-service`**, **`services/deployment-orchestrator`**, **`services/policy-engine-service`** — not started
-9. **`tests/rls-adversarial`** (full suite), **`tests/acceptance`** — partial (smoke-level RLS test only)
+9. **`tests/rls-adversarial`** (full suite), **`tests/acceptance`** — partial (smoke-level RLS test + control-plane-api golden path)
 
 ## Local development
 
@@ -39,6 +39,11 @@ pnpm domain-model:generate     # regenerates packages/domain-model/src/generated
 pnpm typecheck
 pnpm --filter @ai-office/auth run test
 pnpm test:rls-adversarial      # requires APP_DATABASE_URL (the ai_office_app role, not the owner)
+pnpm --filter @ai-office/control-plane-api run test   # golden path + OpenAPI coverage + tenant isolation
+
+# run the control plane locally:
+AUTH_JWT_ISSUER=... AUTH_JWT_AUDIENCE=... AUTH_JWKS_URI=... \
+  pnpm --filter @ai-office/control-plane-api run start   # listens on :3000
 ```
 
 If Docker isn't available in your environment, point `DATABASE_URL` /

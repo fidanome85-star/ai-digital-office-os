@@ -105,6 +105,16 @@ export interface AgentVersions {
   createdAt: string | null;
 }
 
+export interface ApiIdempotencyKeys {
+  tenantId: string; // primary key
+  idempotencyKey: string; // primary key
+  method: string;
+  path: string;
+  responseStatus: number;
+  responseBody: unknown;
+  createdAt: string;
+}
+
 export interface ApprovalRequests {
   requestId: string; // primary key
   tenantId: string;
@@ -577,7 +587,7 @@ export interface WorkingMemoryCache {
 }
 
 /** Every table name currently in the public schema. */
-export type TableName = "a2a_capability_cards" | "agent_messages" | "agent_registry" | "agent_runs" | "agent_tool_bindings" | "agent_versions" | "approval_requests" | "artifact_registry" | "audit_events" | "configuration_versions" | "decision_records" | "deployment_registry" | "feature_flags" | "mcp_server_registry" | "memory_embeddings" | "memory_facts" | "model_evaluation_metrics" | "model_evaluation_runs" | "model_registry" | "model_runs" | "organizations" | "permissions" | "policy_decision_records" | "policy_registry" | "project_registry" | "prompt_registry" | "provider_registry" | "release_registry" | "role_permissions" | "roles" | "routing_decision_records" | "secrets_vault_references" | "task_registry" | "tool_registry" | "usage_events" | "user_organization_membership" | "user_roles" | "users" | "workflow_history" | "workflow_registry" | "working_memory_cache";
+export type TableName = "a2a_capability_cards" | "agent_messages" | "agent_registry" | "agent_runs" | "agent_tool_bindings" | "agent_versions" | "api_idempotency_keys" | "approval_requests" | "artifact_registry" | "audit_events" | "configuration_versions" | "decision_records" | "deployment_registry" | "feature_flags" | "mcp_server_registry" | "memory_embeddings" | "memory_facts" | "model_evaluation_metrics" | "model_evaluation_runs" | "model_registry" | "model_runs" | "organizations" | "permissions" | "policy_decision_records" | "policy_registry" | "project_registry" | "prompt_registry" | "provider_registry" | "release_registry" | "role_permissions" | "roles" | "routing_decision_records" | "secrets_vault_references" | "task_registry" | "tool_registry" | "usage_events" | "user_organization_membership" | "user_roles" | "users" | "workflow_history" | "workflow_registry" | "working_memory_cache";
 
 /** Maps a table name to its generated row type — for generic repository code. */
 export interface TableRowByName {
@@ -587,6 +597,7 @@ export interface TableRowByName {
   "agent_runs": AgentRuns;
   "agent_tool_bindings": AgentToolBindings;
   "agent_versions": AgentVersions;
+  "api_idempotency_keys": ApiIdempotencyKeys;
   "approval_requests": ApprovalRequests;
   "artifact_registry": ArtifactRegistry;
   "audit_events": AuditEvents;

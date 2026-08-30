@@ -3,6 +3,8 @@
   "version": "1.4.0",
   "private": true,
   "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "scripts": {
     "migrate": "tsx scripts/migrate.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"

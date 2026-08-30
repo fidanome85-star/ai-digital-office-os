@@ -1,0 +1,27 @@
+{
+  "name": "@ai-office/control-plane-api",
+  "version": "1.4.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test test/**/*.test.ts"
+  },
+  "dependencies": {
+    "@ai-office/auth": "workspace:*",
+    "@ai-office/db": "workspace:*",
+    "@ai-office/domain-model": "workspace:*",
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.6",
+    "js-yaml": "^5.4.1",
+    "jose": "^5.6.3",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,40 @@
+import type { Express } from "express";
+import { agentsRouter } from "./agents.js";
+import { approvalsRouter } from "./approvals.js";
+import { artifactsRouter } from "./artifacts.js";
+import { costsRouter } from "./costs.js";
+import { decisionsRouter } from "./decisions.js";
+import { deploymentsRouter } from "./deployments.js";
+import { featureFlagsRouter } from "./feature-flags.js";
+import { mcpRouter } from "./mcp.js";
+import { memoryRouter } from "./memory.js";
+import { modelsRouter } from "./models.js";
+import { projectsRouter } from "./projects.js";
+import { providersRouter } from "./providers.js";
+import { secretsRouter } from "./secrets.js";
+import { tasksRouter } from "./tasks.js";
+import { tenantsRouter } from "./tenants.js";
+import { toolsRouter } from "./tools.js";
+import { usageRouter } from "./usage.js";
+import { workflowsRouter } from "./workflows.js";
+
+export function registerRoutes(app: Express): void {
+  app.use(tenantsRouter);
+  app.use(projectsRouter);
+  app.use(tasksRouter);
+  app.use(agentsRouter);
+  app.use(modelsRouter);
+  app.use(approvalsRouter);
+  app.use(providersRouter);
+  app.use(workflowsRouter);
+  app.use(artifactsRouter);
+  app.use(memoryRouter);
+  app.use(featureFlagsRouter);
+  app.use(secretsRouter);
+  app.use(toolsRouter);
+  app.use(mcpRouter);
+  app.use(usageRouter);
+  app.use(costsRouter);
+  app.use(deploymentsRouter);
+  app.use(decisionsRouter);
+}

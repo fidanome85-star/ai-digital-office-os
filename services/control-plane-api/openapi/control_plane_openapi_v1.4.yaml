@@ -523,6 +523,13 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
 
   /agents/{agent_id}/messages:
+    # NOTE (v1.4 integrity fix): this path was declared twice in earlier
+    # drafts of this document (once for GET, once for POST). Duplicate YAML
+    # mapping keys are undefined behavior — most parsers (js-yaml, PyYAML)
+    # silently keep only the LAST occurrence, which would have made the GET
+    # operation below disappear entirely from any spec-driven tooling
+    # without a single visible error. Merged into one path item here; both
+    # operations are implemented in services/control-plane-api.
     get:
       summary: List agent-to-agent messages sent to/from this agent
       parameters:
@@ -532,6 +539,24 @@ paths:
         '200':
           description: Message list
           content: { application/json: { schema: { type: array, items: { type: object } } } }
+    post:
+      summary: Send a typed agent-to-agent message (idempotency-keyed — clause 63)
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receiver_agent_id, message_type]
+              properties:
+                receiver_agent_id: { type: string }
+                message_type: { type: string }
+                input_payload: { type: object }
+      responses:
+        '202': { description: Message queued for delivery }
 
   /models/route:
     post:
@@ -626,6 +651,9 @@ paths:
         '200': { description: Workflow resumed }
 
   /artifacts:
+    # NOTE (v1.4 integrity fix): same duplicate-key issue as
+    # /agents/{agent_id}/messages above — GET and POST were declared as two
+    # separate `/artifacts:` mapping keys in earlier drafts. Merged here.
     get:
       summary: List artifacts for a project
       parameters:
@@ -637,6 +665,14 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Artifact' } }
+    post:
+      summary: Register a new artifact (immutable once status=APPROVED — clause 48)
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ArtifactCreateRequest' } } }
+      responses:
+        '201': { description: Artifact created, content: { application/json: { schema: { $ref: '#/components/schemas/Artifact' } } } }
 
   /artifacts/{artifact_id}:
     get:
@@ -799,36 +835,6 @@ paths:
       responses:
         '200': { description: Version activated }
         '403': { $ref: '#/components/responses/PolicyDenied' }
-
-  /agents/{agent_id}/messages:
-    post:
-      summary: Send a typed agent-to-agent message (idempotency-keyed — clause 63)
-      parameters:
-        - { name: agent_id, in: path, required: true, schema: { type: string } }
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [receiver_agent_id, message_type]
-              properties:
-                receiver_agent_id: { type: string }
-                message_type: { type: string }
-                input_payload: { type: object }
-      responses:
-        '202': { description: Message queued for delivery }
-
-  /artifacts:
-    post:
-      summary: Register a new artifact (immutable once status=APPROVED — clause 48)
-      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
-      requestBody:
-        required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/ArtifactCreateRequest' } } }
-      responses:
-        '201': { description: Artifact created, content: { application/json: { schema: { $ref: '#/components/schemas/Artifact' } } } }
 
   /artifacts/{artifact_id}/lineage:
     get:
