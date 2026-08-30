@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import express, { type Express } from "express";
 import { createTokenVerifier, type AuthConfig, type TokenVerifier } from "@ai-office/auth";
+import { runWithContext } from "@ai-office/observability";
 import { requireAuth } from "./auth-middleware.js";
 import { errorHandler, sendError } from "./errors.js";
 import { requireIdempotencyKey } from "./idempotency.js";
@@ -19,7 +20,9 @@ export function createApp(authConfig: AuthConfig, options: CreateAppOptions = {}
   app.use((req, _res, next) => {
     const incoming = req.header("x-correlation-id");
     req.correlationId = incoming && incoming.length > 0 ? incoming : randomUUID();
-    next();
+    // Tenant id isn't known yet at this point — requireAuth() nests a
+    // second runWithContext once the token is verified, adding it.
+    runWithContext({ correlationId: req.correlationId }, () => next());
   });
 
   const verifier = options.verifier ?? createTokenVerifier(authConfig);

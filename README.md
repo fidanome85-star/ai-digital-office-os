@@ -5,10 +5,12 @@ model router, workflow engine, and policy engine for running governed AI
 agents inside an organization. Specification: `docs/blueprint/` (v1.4
 consolidated master + integrity review + acceptance checklist).
 
-**Status: Phase 2 of 9 complete.** See `PHASE_STATUS.md` for exactly what
+**Status: Phase 3 of 9 complete.** See `PHASE_STATUS.md` for exactly what
 is built, tested and verified versus what is still a TARGET. The control
-plane is a real, tested, RLS-enforced HTTP API now — but no agent actually
-*executes* anything yet (that's Phase 3 onward).
+plane is a real, tested, RLS-enforced HTTP API, and agent specifications
+now move through a real, offline-first, policy-gated lifecycle pipeline —
+but no agent actually *executes a task* yet (that needs a real model
+provider, which is Phase 4 onward).
 
 ## Build order
 
@@ -18,13 +20,13 @@ order"), one phase at a time, each verified before the next starts:
 
 1. **`packages/db`** — schema + migrations ✅ done
 2. **`packages/domain-model`** — canonical types generated from the schema ✅ done
-3. **`packages/auth`** (+ observability, policy-engine) — auth ✅ done, the other two still empty scaffolding
+3. **`packages/auth`**, **`packages/observability`**, **`packages/policy-engine`** — ✅ done
 4. **`services/control-plane-api`** — ✅ done (all 40 paths / 48 operations)
-5. **`services/agent-factory`** — not started
+5. **`services/agent-factory`** — ✅ done (DRAFT → SANDBOX → TESTED → EVALUATED → APPROVED)
 6. **`services/model-router-gateway`**, **`services/tool-gateway-mcp`** — not started
 7. **`services/workflow-engine`** — not started
 8. **`services/memory-service`**, **`services/cost-usage-service`**, **`services/deployment-orchestrator`**, **`services/policy-engine-service`** — not started
-9. **`tests/rls-adversarial`** (full suite), **`tests/acceptance`** — partial (smoke-level RLS test + control-plane-api golden path)
+9. **`tests/rls-adversarial`** (full suite), **`tests/acceptance`** — partial (smoke-level RLS test + control-plane-api golden path + agent-factory pipeline tests)
 
 ## Local development
 
@@ -38,12 +40,18 @@ pnpm db:migrate                # applies packages/db/migrations/*.sql in order
 pnpm domain-model:generate     # regenerates packages/domain-model/src/generated/tables.ts
 pnpm typecheck
 pnpm --filter @ai-office/auth run test
+pnpm --filter @ai-office/observability run test
+pnpm --filter @ai-office/policy-engine run test
 pnpm test:rls-adversarial      # requires APP_DATABASE_URL (the ai_office_app role, not the owner)
 pnpm --filter @ai-office/control-plane-api run test   # golden path + OpenAPI coverage + tenant isolation
+pnpm --filter @ai-office/agent-factory run test        # lifecycle pipeline, real Postgres
 
 # run the control plane locally:
 AUTH_JWT_ISSUER=... AUTH_JWT_AUDIENCE=... AUTH_JWKS_URI=... \
   pnpm --filter @ai-office/control-plane-api run start   # listens on :3000
+
+# advance one agent through the automated pipeline (DRAFT -> ... -> APPROVED):
+pnpm --filter @ai-office/agent-factory run process -- <tenantId> <agentId>
 ```
 
 If Docker isn't available in your environment, point `DATABASE_URL` /

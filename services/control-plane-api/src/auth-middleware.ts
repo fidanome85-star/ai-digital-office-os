@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { AuthError, runWithPrincipal, type TokenVerifier } from "@ai-office/auth";
+import { runWithContext } from "@ai-office/observability";
 import { sendError } from "./errors.js";
 
 /**
@@ -21,7 +22,9 @@ export function requireAuth(verifier: TokenVerifier) {
     try {
       const principal = await verifier.verify(token);
       req.principal = principal;
-      runWithPrincipal(principal, () => next());
+      runWithContext({ correlationId: req.correlationId ?? "unknown", tenantId: principal.tenantId }, () =>
+        runWithPrincipal(principal, () => next()),
+      );
     } catch (err) {
       if (err instanceof AuthError) {
         sendError(res, req, 401, "AUTHORIZATION_ERROR", err.message);

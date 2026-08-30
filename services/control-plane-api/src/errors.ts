@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
+import { logger } from "./logger.js";
 
 /** Matches components.schemas.ErrorResponse.error_code in the OpenAPI contract exactly. */
 export type ErrorCode =
@@ -67,7 +68,6 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     sendError(res, req, err.httpStatus, err.errorCode, err.message, err.retryable);
     return;
   }
-  // eslint-disable-next-line no-console
-  console.error("Unhandled error:", err);
+  logger.error("Unhandled error", { error: err instanceof Error ? err.stack ?? err.message : String(err) });
   sendError(res, req, 500, "UNKNOWN_ERROR", "An unexpected error occurred.", true);
 }

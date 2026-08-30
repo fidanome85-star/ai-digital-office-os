@@ -43,14 +43,40 @@ marked VERIFIED without the command that proves it.
 | RLS still enforced with the two new closure tables (`api_idempotency_keys`) | VERIFIED | `pnpm db:migrate` shows `api_idempotency_keys` created with RLS by migration 0023; exercised implicitly by every idempotent write in the golden path |
 | CI runs the full test suite (Phase 1 + Phase 2) on every push | TEST REQUIRED | `.github/workflows/ci.yml` updated; same "not yet observed on GitHub's runners" caveat as Phase 1 |
 
-## What has NOT been built yet (both phases)
+## Phase 3 — services/agent-factory, packages/observability, packages/policy-engine
 
-- No agent actually executes anything — no LLM provider call, no prompt
-  sent anywhere. Agents, tasks and workflows are governed *records*, not
-  running processes yet (that's `services/agent-factory`,
-  `services/workflow-engine` — build-order steps 5 and 7).
-- `packages/observability`, `packages/policy-engine`, `packages/shared-types`
-  are still empty scaffolding (their `README.md` only).
+| Item | Status | Evidence |
+|---|---|---|
+| Structured logging (JSON to stdout/stderr, no network dependency) | VERIFIED | `pnpm --filter @ai-office/observability run test` — 4/4, asserts JSON shape and stdout/stderr routing by level |
+| Correlation-id / tenant-id context propagation | VERIFIED | same suite — attached when a context is active, cleanly absent when not |
+| Span timing helper (`withSpan`) logs start/success/failure with duration | VERIFIED | `pnpm --filter @ai-office/observability run test` — 2/2, including the error-re-throw case |
+| Wired into a second real service (not just written once) | VERIFIED | `services/control-plane-api/src/errors.ts`'s unhandled-error path and every `services/agent-factory` pipeline step now log through `@ai-office/observability` — control-plane-api's full 30-test suite still passes with this wired in |
+| Policy engine: pure GREEN/YELLOW/RED rule evaluation, no I/O | VERIFIED | `pnpm --filter @ai-office/policy-engine run test` — 11/11 |
+| Tenant-specific rules override defaults by specificity | VERIFIED | same suite — exact action+risk rule beats a wildcard rule beats the built-in default |
+| Malformed `policy_registry.rules` JSONB fails closed, not silently ignored | VERIFIED | same suite — `parsePolicyRules` throws `PolicyEngineError` on any malformed entry rather than dropping it |
+| Agent lifecycle: DRAFT → SANDBOX (policy gate + tool-reference integrity) | VERIFIED | `pnpm --filter @ai-office/agent-factory run test` — RED-security agent blocked with `POLICY_BLOCKED`, decision recorded in `policy_decision_records`; agent referencing a nonexistent tool blocked with `SANDBOX_VALIDATION_FAILED` |
+| A blocked policy decision is still recorded, even though the state change rolls back | VERIFIED | same suite — required restructuring `advanceToSandbox` into two transactions after the single-transaction version failed exactly this test; see ADR 0003 §4 |
+| SANDBOX → TESTED (JSON Schema structural validation, fully offline via Ajv) | VERIFIED | same suite — a schema with `{"type": 123}` is rejected with `SCHEMA_VALIDATION_FAILED` |
+| TESTED → EVALUATED (completeness scoring) and EVALUATED → APPROVED (quality gate) | VERIFIED | same suite — a well-formed agent reaches APPROVED with score ≥ 60; a minimal one stops at EVALUATED with `QUALITY_GATE_FAILED` |
+| `runFullPipeline` preserves partial progress on failure, doesn't throw past the caller | VERIFIED | same suite — the low-score case returns `{reachedState: "EVALUATED", stoppedAt: {...}}` rather than throwing, and the agent is left at EVALUATED, not reverted to DRAFT |
+| CLI entrypoint (`pnpm --filter @ai-office/agent-factory run process -- <tenant> <agent>`) | VERIFIED | manual run against real Postgres: exit code 0, agent reached APPROVED with score 90, logged via observability throughout |
+| Fully offline-first (no network call anywhere in the pipeline) | VERIFIED by construction | Ajv validates schemas in-process; scoring is a local heuristic; the only dependency is a reachable Postgres — see ADR 0003 §2 |
+| APPROVED → ACTIVE (human `AGENT_ACTIVATE` governance) | VERIFIED (Phase 2, unchanged) | agent-factory does not duplicate or bypass this — see ADR 0003 §1 |
+| CI runs the full test suite (Phases 1–3) on every push | TEST REQUIRED | `.github/workflows/ci.yml` updated; same "not yet observed on GitHub's runners" caveat as Phases 1–2 |
+
+## What has NOT been built yet
+
+- No agent actually executes a task — no LLM provider call, no prompt sent
+  anywhere. Agent-factory's pipeline governs the agent *specification's*
+  lifecycle (is it well-formed, is it worth reviewing); running agent
+  against real work is `services/workflow-engine` +
+  `services/model-router-gateway` (build-order steps 6–7).
+- `packages/shared-types` is still empty scaffolding (its `README.md`
+  only) — small cross-cutting types not yet needed by anything built so
+  far.
+- The evaluation score in `services/agent-factory/src/scoring.ts` is a
+  specification-completeness heuristic, not a real capability evaluation —
+  same honesty discipline as Phase 2's `/models/evaluate` placeholder.
 - No production secrets, IaC, or deployment topology (explicitly out of
   scope per blueprint clause 74 and the scaffold's own "what NOT to build
   here").
@@ -62,9 +88,9 @@ marked VERIFIED without the command that proves it.
 
 ## Next phase
 
-**Phase 3 — `services/agent-factory`**: the agent lifecycle pipeline
-(DRAFT → SANDBOX → TESTED → EVALUATED → APPROVED → ACTIVE), depends on
-control-plane-api's `/agents/*` and `/approvals/*` endpoints existing —
-which they now do. This is also the natural point to build out
-`packages/policy-engine` and `packages/observability` for real, since
-agent-factory needs both.
+**Phase 4 — `services/model-router-gateway` and `services/tool-gateway-mcp`**:
+provider/model routing and MCP tool-binding enforcement. This is the point
+where agent-factory's rule-based `/models/route` (Phase 2) and completeness
+scoring (Phase 3) get replaced with something backed by a real provider
+adapter — the natural next place the "documented placeholder" list above
+starts shrinking rather than growing.

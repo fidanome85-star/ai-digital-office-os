@@ -57,8 +57,17 @@ jobs:
       - name: Unit tests (packages/auth)
         run: pnpm --filter @ai-office/auth run test
 
+      - name: Unit tests (packages/observability)
+        run: pnpm --filter @ai-office/observability run test
+
+      - name: Unit tests (packages/policy-engine)
+        run: pnpm --filter @ai-office/policy-engine run test
+
       - name: RLS cross-tenant adversarial test
         run: pnpm test:rls-adversarial
 
       - name: control-plane-api integration tests (golden path + OpenAPI coverage + tenant isolation)
         run: pnpm --filter @ai-office/control-plane-api run test
+
+      - name: agent-factory pipeline integration tests
+        run: pnpm --filter @ai-office/agent-factory run test
