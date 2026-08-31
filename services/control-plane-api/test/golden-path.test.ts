@@ -115,6 +115,11 @@ after(async () => {
     await owner.query("DELETE FROM api_idempotency_keys WHERE tenant_id = $1", [t]);
     await owner.query("DELETE FROM tool_registry WHERE tool_id = $1", [toolId]);
     await owner.query("DELETE FROM mcp_server_registry WHERE mcp_server_id = $1", [mcpServerId]);
+    await owner.query("DELETE FROM model_runs WHERE tenant_id = $1", [t]);
+    await owner.query(
+      "DELETE FROM model_evaluation_metrics WHERE evaluation_id IN (SELECT evaluation_id FROM model_evaluation_runs WHERE model_id = $1)",
+      [modelId],
+    );
     await owner.query("DELETE FROM model_evaluation_runs WHERE model_id = $1", [modelId]);
     await owner.query("DELETE FROM model_registry WHERE model_id = $1", [modelId]);
     await owner.query("DELETE FROM provider_registry WHERE provider_id = $1", [providerId]);

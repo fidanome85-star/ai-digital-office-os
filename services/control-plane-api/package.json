@@ -15,6 +15,7 @@
     "@ai-office/deployment-orchestrator": "workspace:*",
     "@ai-office/domain-model": "workspace:*",
     "@ai-office/memory-service": "workspace:*",
+    "@ai-office/model-router-gateway": "workspace:*",
     "@ai-office/observability": "workspace:*",
     "@ai-office/policy-engine-service": "workspace:*",
     "express": "^4.19.2",

@@ -173,6 +173,9 @@ importers:
       '@ai-office/memory-service':
         specifier: workspace:*
         version: link:../memory-service
+      '@ai-office/model-router-gateway':
+        specifier: workspace:*
+        version: link:../model-router-gateway
       '@ai-office/observability':
         specifier: workspace:*
         version: link:../../packages/observability

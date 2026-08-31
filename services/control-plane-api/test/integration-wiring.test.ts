@@ -85,6 +85,7 @@ after(async () => {
     await owner.query("DELETE FROM memory_facts WHERE tenant_id = $1", [tenantId]);
     await owner.query("DELETE FROM secrets_vault_references WHERE tenant_id = $1", [tenantId]);
     await owner.query("DELETE FROM usage_events WHERE tenant_id = $1", [tenantId]);
+    await owner.query("DELETE FROM model_runs WHERE tenant_id = $1", [tenantId]);
     await owner.query("DELETE FROM budget_tiers WHERE tenant_id = $1", [tenantId]);
     await owner.query("DELETE FROM release_registry WHERE tenant_id = $1", [tenantId]);
     await owner.query("DELETE FROM project_registry WHERE tenant_id = $1", [tenantId]);
@@ -349,5 +350,59 @@ describe("GET /approvals — real expiry sweep via policy-engine-service", () =>
       requestId,
     ]);
     assert.equal(dbRows[0].decision, "EXPIRED");
+  });
+});
+
+describe("POST /models/evaluate — real benchmark harness via model-router-gateway", () => {
+  it("computes a real execution-reliability score instead of carrying evaluation_score forward", async () => {
+    const providerId = `prov-eval-${runTag}`;
+    const modelId = `model-eval-${runTag}`;
+    await owner.query(
+      "INSERT INTO provider_registry (provider_id, provider_name, provider_type, adapter_type, availability) VALUES ($1,'Eval Provider','local','local-echo','ACTIVE')",
+      [providerId],
+    );
+    // A deliberately different pre-existing evaluation_score — if the
+    // endpoint still carried this forward (the old placeholder behavior),
+    // the persisted score would be 12.5, not the real 100 a fully
+    // successful local-echo run must produce.
+    await owner.query(
+      "INSERT INTO model_registry (model_id, provider_id, model_name, availability, evaluation_score) VALUES ($1,$2,'Eval Model','ACTIVE',12.5)",
+      [modelId, providerId],
+    );
+
+    try {
+      const res = await post("/models/evaluate", { model_id: modelId, benchmark_suite: "acceptance-suite-v1" });
+      assert.equal(res.status, 202);
+      const body = await json(res);
+      assert.equal(
+        Number(body.score),
+        100,
+        "a fully successful real run against local-echo must score 100, not the carried-forward 12.5",
+      );
+
+      const { rows: metricRows } = await owner.query(
+        "SELECT metric_name, metric_value FROM model_evaluation_metrics WHERE evaluation_id = $1 ORDER BY metric_name",
+        [body.evaluationId],
+      );
+      const metricNames = metricRows.map((r) => r.metric_name);
+      assert.deepEqual(metricNames, ["avg_latency_ms", "avg_output_tokens", "success_rate"]);
+      assert.equal(Number(metricRows.find((r) => r.metric_name === "success_rate")!.metric_value), 1);
+
+      const { rows: runRows } = await owner.query(
+        "SELECT count(*)::int AS n FROM model_runs WHERE tenant_id = $1 AND model_id = $2",
+        [tenantId, modelId],
+      );
+      assert.equal(runRows[0].n, 3, "each of the default 3 benchmark prompts is a real executeModelRun call");
+    } finally {
+      await owner.query(
+        "DELETE FROM model_evaluation_metrics WHERE evaluation_id IN (SELECT evaluation_id FROM model_evaluation_runs WHERE model_id = $1)",
+        [modelId],
+      );
+      await owner.query("DELETE FROM model_evaluation_runs WHERE model_id = $1", [modelId]);
+      await owner.query("DELETE FROM usage_events WHERE model_id = $1", [modelId]);
+      await owner.query("DELETE FROM model_runs WHERE model_id = $1", [modelId]);
+      await owner.query("DELETE FROM model_registry WHERE model_id = $1", [modelId]);
+      await owner.query("DELETE FROM provider_registry WHERE provider_id = $1", [providerId]);
+    }
   });
 });

@@ -340,6 +340,15 @@ components:
         model_id: { type: string }
         benchmark_suite: { type: string }
         evaluator_version: { type: string }
+        prompts:
+          type: array
+          items: { type: string }
+          description: >
+            Optional. Overrides the default 3-prompt benchmark set run
+            through the real model-router-gateway execution path. The
+            resulting score measures execution reliability (the fraction
+            of these prompts that completed without error), not answer
+            correctness — see docs/decisions/0011.
 
     ModelEvaluationResult:
       type: object

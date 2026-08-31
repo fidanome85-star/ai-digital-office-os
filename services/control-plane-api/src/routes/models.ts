@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { getCurrentTenantId } from "@ai-office/auth";
+import { runBenchmarkSuite } from "@ai-office/model-router-gateway";
 import { ah } from "../async-handler.js";
-import { withRequestTenant } from "../db.js";
+import { pool, withRequestTenant } from "../db.js";
 import { withIdempotentWrite } from "../idempotency.js";
 import { ApiError } from "../errors.js";
 import { camelizeRow, camelizeRows } from "../row-mapper.js";
@@ -114,10 +115,22 @@ modelsRouter.get(
   }),
 );
 
+/**
+ * Runs @ai-office/model-router-gateway's real runBenchmarkSuite (a fixed
+ * set of real prompts through the real executeModelRun path — real
+ * retries, real model_runs/usage_events rows) instead of the old
+ * placeholder that just carried model_registry.evaluation_score forward.
+ * The score this persists is execution reliability (did the real calls
+ * succeed), not answer correctness — see docs/decisions/0011 for why that
+ * distinction matters and why this doesn't try to grade correctness.
+ * Per-metric rows (success_rate, avg_latency_ms, avg_output_tokens) go to
+ * model_evaluation_metrics, the table that existed for exactly this and
+ * was unused until now.
+ */
 modelsRouter.post(
   "/models/evaluate",
   ah(async (req, res) => {
-    const { model_id, benchmark_suite, evaluator_version } = req.body ?? {};
+    const { model_id, benchmark_suite, evaluator_version, prompts } = req.body ?? {};
     if (!model_id || !benchmark_suite) throw ApiError.validation("model_id and benchmark_suite are required.");
 
     const tenantId = getCurrentTenantId()!;
@@ -126,32 +139,49 @@ modelsRouter.post(
         client,
         { tenantId, idempotencyKey: req.idempotencyKey!, method: "POST", path: "/models/evaluate" },
         async () => {
-          const model = await client.query("SELECT model_id, provider_id, evaluation_score FROM model_registry WHERE model_id = $1", [
+          const model = await client.query("SELECT model_id, provider_id FROM model_registry WHERE model_id = $1", [
             model_id,
           ]);
           if (model.rows.length === 0) throw ApiError.notFound(`Model ${model_id} not found.`);
+          const providerId = model.rows[0].provider_id;
 
-          // No benchmark harness exists yet (that's model-router-gateway,
-          // build-order step 6) — this persists a real evaluation_runs row
-          // and carries forward the model's existing evaluation_score
-          // rather than fabricating a fresh score. results.note makes the
-          // placeholder status explicit for any caller reading this back.
-          const carriedScore = model.rows[0].evaluation_score;
+          const suiteResult = await runBenchmarkSuite(pool, {
+            tenantId,
+            providerId,
+            modelId: model_id,
+            ...(Array.isArray(prompts) ? { prompts } : {}),
+          });
+
           const { rows } = await client.query(
             `INSERT INTO model_evaluation_runs (provider_id, model_id, benchmark_suite, evaluator_version, score, results)
              VALUES ($1, $2, $3, $4, $5, $6)
              RETURNING *`,
             [
-              model.rows[0].provider_id,
+              providerId,
               model_id,
               benchmark_suite,
               evaluator_version ?? null,
-              carriedScore,
+              suiteResult.score,
               JSON.stringify({
-                note: "placeholder — no benchmark harness implemented yet; score carried forward from model_registry.evaluation_score, not freshly measured",
+                note: "score measures execution reliability (fraction of real prompts that completed without error), not answer correctness — see docs/decisions/0011",
+                cases: suiteResult.cases,
               }),
             ],
           );
+          const evaluationId = rows[0].evaluation_id;
+
+          const metrics: [string, number, string][] = [
+            ["success_rate", suiteResult.successRate, "ratio"],
+            ["avg_latency_ms", suiteResult.averageLatencyMs, "ms"],
+            ["avg_output_tokens", suiteResult.averageOutputTokens, "tokens"],
+          ];
+          for (const [metricName, metricValue, unit] of metrics) {
+            await client.query(
+              "INSERT INTO model_evaluation_metrics (evaluation_id, metric_name, metric_value, unit) VALUES ($1, $2, $3, $4)",
+              [evaluationId, metricName, metricValue, unit],
+            );
+          }
+
           return { status: 202, body: camelizeRow(rows[0]) };
         },
       ),
