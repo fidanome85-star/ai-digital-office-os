@@ -149,10 +149,20 @@ marked VERIFIED without the command that proves it.
 
 ## What has NOT been built yet
 
-- No live call has been made against a real hosted LLM provider or a real
-  MCP server anywhere in this repo — by explicit choice starting Phase 4
-  (see ADR 0004), not a limitation of the adapter/client code itself.
-  workflow-engine inherits the same posture (ADR 0005 §5).
+- No live call has been made against a real hosted MCP server, or against
+  OpenAI or Anthropic specifically — still no credentials for those in
+  this environment, same explicit-choice posture since Phase 4 (ADR
+  0004). **Google Gemini is the one exception**, verified once, live: a
+  one-off, never-committed script ran this repo's real, unmodified
+  `executeModelRun` and the Phase 11 `runBenchmarkSuite` against
+  `gemini-flash-latest` with a temporary key supplied and then intended
+  to be rotated by the user — a real completion came back ("The capital
+  of France is Paris.", 14/7 tokens, `finishReason: STOP`), and the
+  benchmark suite scored a real 100% across all 3 prompts. No key is
+  stored anywhere in this repo; see ADR 0012 for exactly what was run and
+  why this is a one-time verification, not a standing capability.
+  workflow-engine inherits the same "real code, not yet live" posture for
+  everything except this one verified path (ADR 0005 §5).
 - The step vocabulary is intentionally minimal (`model_call`, `tool_call`,
   `create_artifact`) — no conditional branching, fan-out/fan-in, or a
   `wait_for_approval` step that blocks on `approval_requests`. Additive

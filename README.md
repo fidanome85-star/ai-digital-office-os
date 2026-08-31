@@ -24,11 +24,15 @@ a dedicated `tests/acceptance` suite proves all 24 bullets in the
 implementation acceptance checklist; and `services/scheduler-worker` keeps
 the two housekeeping sweeps (`expirePendingApprovals`,
 `purgeExpiredWorkingMemory`) running on a real schedule rather than only
-when an incidental request triggers them. No live API key, MCP server, or
-deployment infrastructure has been wired in yet (a deliberate choice, see
-`docs/decisions/0004`) — what's left is operating the system against real
-credentials/infrastructure, not building more of it. See
-`PHASE_STATUS.md`'s "Next phase."
+when an incidental request triggers them. No MCP server, OpenAI, or
+Anthropic credentials have been wired in yet (a deliberate choice, see
+`docs/decisions/0004`) — Google Gemini is the one exception, verified
+once, live, with a temporary key: a real completion and a real 100%
+benchmark score came back through this repo's unmodified execution path,
+no code changes needed (see `docs/decisions/0012`). What's left is
+operating the system against the remaining real credentials/
+infrastructure, not building more of it. See `PHASE_STATUS.md`'s "Next
+phase."
 
 ## Build order
 
