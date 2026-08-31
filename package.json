@@ -15,7 +15,13 @@
     "db:down": "docker compose -f infra/docker/docker-compose.yml down",
     "db:migrate": "tsx packages/db/scripts/migrate.ts",
     "domain-model:generate": "pnpm --filter @ai-office/domain-model run generate",
-    "test:rls-adversarial": "tsx --test tests/rls-adversarial/**/*.test.ts"
+    "test:rls-adversarial": "tsx --test tests/rls-adversarial/**/*.test.ts",
+    "test:acceptance": "tsx --test tests/acceptance/**/*.test.ts"
+  },
+  "dependencies": {
+    "@ai-office/cost-usage-service": "workspace:*",
+    "@ai-office/db": "workspace:*",
+    "@ai-office/tool-gateway-mcp": "workspace:*"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

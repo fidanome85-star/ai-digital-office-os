@@ -5,7 +5,7 @@ model router, workflow engine, and policy engine for running governed AI
 agents inside an organization. Specification: `docs/blueprint/` (v1.4
 consolidated master + integrity review + acceptance checklist).
 
-**Status: Phase 7 of 9 complete — core system functionally complete
+**Status: Phase 9 of 9 complete — functionally complete and hardened
 end-to-end.** See `PHASE_STATUS.md` for exactly what is built, tested and
 verified versus what is still a TARGET. The control plane is a real,
 tested, RLS-enforced HTTP API; agent specifications move through a real,
@@ -15,14 +15,16 @@ workflow-engine durably chains them — model call → tool call → artifact �
 into one replayable, resumable, pausable multi-step flow; all eight
 build-order services exist with real, tested logic (tiered memory with
 real pgvector semantic search, real budget-tier cost tracking,
-health-checked deploy/rollback, policy CRUD + approval expiry); and
-control-plane-api's endpoints now actually call through to that logic —
-`GET /costs`, `POST /memory/query`, `POST /deployments`(`/rollback`), and
-`GET /approvals` are wired to the real services, not standing in for them.
-No live API key, MCP server, or deployment infrastructure has been wired
-in yet (a deliberate choice, see `docs/decisions/0004`). What's left
-(Phases 8–9) is hardening: the formal ≥50-case RLS adversarial suite and a
-dedicated acceptance-test directory — see `PHASE_STATUS.md`'s "Next phase."
+health-checked deploy/rollback, policy CRUD + approval expiry) and are
+wired into control-plane-api's endpoints (`/costs`, `/memory/query`,
+`/deployments*`, `/approvals`), not standing in for them; the RLS
+adversarial suite covers all 36 tenant-scoped tables with 75 real cases;
+and a dedicated `tests/acceptance` suite proves all 24 bullets in the
+implementation acceptance checklist with real, evidence-linked tests. No
+live API key, MCP server, or deployment infrastructure has been wired in
+yet (a deliberate choice, see `docs/decisions/0004`) — what's left is
+operating the system against real credentials/infrastructure, not
+building more of it. See `PHASE_STATUS.md`'s "Next phase."
 
 ## Build order
 
@@ -38,7 +40,7 @@ order"), one phase at a time, each verified before the next starts:
 6. **`services/model-router-gateway`**, **`services/tool-gateway-mcp`** — ✅ done (adapters/client tested against mock servers, no live provider/MCP server wired in yet)
 7. **`services/workflow-engine`** — ✅ done (durable, replayable, resumable, pausable multi-step execution)
 8. **`services/memory-service`**, **`services/cost-usage-service`**, **`services/deployment-orchestrator`**, **`services/policy-engine-service`** — ✅ done (tiered memory + real pgvector semantic search, real budget-tier cost tracking, health-checked deploy/rollback, policy CRUD + approval expiry), and ✅ wired into control-plane-api's `/costs`, `/memory/query`, `/deployments*`, `/approvals` endpoints (Phase 7 — see `docs/decisions/0007`)
-9. **`tests/rls-adversarial`** (full ≥50-case suite), **`tests/acceptance`** — partial (smoke-level 5-case RLS test + control-plane-api golden path/integration-wiring + agent-factory/model-router/tool-gateway/workflow-engine integration tests)
+9. **`tests/rls-adversarial`** (full ≥50-case suite), **`tests/acceptance`** — ✅ done (75-case RLS adversarial suite across all 36 tenant-scoped tables; 21-case acceptance suite covering all 24 checklist bullets — see `docs/decisions/0008`)
 
 ## Local development
 
@@ -54,7 +56,7 @@ pnpm typecheck
 pnpm --filter @ai-office/auth run test
 pnpm --filter @ai-office/observability run test
 pnpm --filter @ai-office/policy-engine run test
-pnpm test:rls-adversarial      # requires APP_DATABASE_URL (the ai_office_app role, not the owner)
+pnpm test:rls-adversarial      # smoke test + full 75-case suite across all 36 tenant-scoped tables; requires APP_DATABASE_URL (the ai_office_app role, not the owner)
 pnpm --filter @ai-office/control-plane-api run test   # golden path + OpenAPI coverage + tenant isolation + Phase 7 wiring
 pnpm --filter @ai-office/agent-factory run test        # lifecycle pipeline, real Postgres
 pnpm --filter @ai-office/model-router-gateway run test # provider adapters vs. mock servers + real execution
@@ -64,6 +66,7 @@ pnpm --filter @ai-office/memory-service run test         # tiered memory + real 
 pnpm --filter @ai-office/cost-usage-service run test      # real budget_status against budget_tiers
 pnpm --filter @ai-office/deployment-orchestrator run test # health-checked advance/rollback vs. mock server
 pnpm --filter @ai-office/policy-engine-service run test   # policy CRUD + approval expiry sweep
+pnpm test:acceptance           # all 24 implementation_acceptance_checklist_v1.4.md bullets, real assertions
 
 # run the control plane locally:
 AUTH_JWT_ISSUER=... AUTH_JWT_AUDIENCE=... AUTH_JWKS_URI=... \

@@ -63,7 +63,7 @@ jobs:
       - name: Unit tests (packages/policy-engine)
         run: pnpm --filter @ai-office/policy-engine run test
 
-      - name: RLS cross-tenant adversarial test
+      - name: RLS cross-tenant adversarial suite (smoke test + full ≥50-case coverage across every tenant-scoped table)
         run: pnpm test:rls-adversarial
 
       - name: control-plane-api integration tests (golden path + OpenAPI coverage + tenant isolation)
@@ -92,3 +92,6 @@ jobs:
 
       - name: policy-engine-service tests (policy CRUD + approval expiry)
         run: pnpm --filter @ai-office/policy-engine-service run test
+
+      - name: Acceptance suite (one file per implementation_acceptance_checklist_v1.4.md section)
+        run: pnpm test:acceptance

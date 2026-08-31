@@ -132,6 +132,18 @@ marked VERIFIED without the command that proves it.
 | No regression in existing golden-path / OpenAPI-coverage / tenant-isolation suites | VERIFIED | `pnpm --filter @ai-office/control-plane-api run test` — 37/37 passing (30 pre-existing + 7 new) |
 | CI runs the full test suite (Phases 1–7) on every push | TEST REQUIRED | `.github/workflows/ci.yml`'s existing `control-plane-api` test step already globs `test/**/*.test.ts`, so it picks up `integration-wiring.test.ts` with no CI file changes needed; same "not yet observed green on GitHub's runners" caveat as every prior phase |
 
+## Phase 8–9 — full RLS adversarial suite + acceptance tests (hardening)
+
+| Item | Status | Evidence |
+|---|---|---|
+| Full ≥50-case RLS adversarial suite across every tenant-scoped table | VERIFIED | `pnpm test:rls-adversarial` — 75/75 passing (5 from the original smoke test + 70 new: 35 tables x [INSERT-forgery rejected, cross-tenant SELECT/UPDATE/DELETE no-op]), against real Postgres as the `ai_office_app` role |
+| Composite-FK tables (`role_permissions`, `user_roles`) get a corrected forged-row case, not a false pass | VERIFIED | `tests/rls-adversarial/full-coverage.test.ts` — the forged row uses the victim's real `role_id` so the FK stays valid and `WITH CHECK` is what actually rejects it; see ADR 0008 §2 |
+| `tests/acceptance/critical.test.ts` (6/6 bullets) | VERIFIED | `pnpm test:acceptance` — project/FK resolution, agent-version-targets-specific-version, agent/model-run/artifact lineage via real JOIN, `pg_class.relrowsecurity` on all 36 tenant tables, `pg_policies` USING+WITH CHECK completeness, and a coverage-completeness check that the RLS suite's table list exactly matches the live schema's tenant-scoped tables |
+| `tests/acceptance/ai-platform.test.ts` (5/5 bullets) | VERIFIED | same command — versioned/rerunnable model evaluations, persisted routing decisions, real budget reconciliation via `getCostSummary`, `BINDING_DENIED` on an unbound tool call, `POLICY_BLOCKED` (persisted to `policy_decision_records`) on a RED-risk tool with a valid binding |
+| `tests/acceptance/api.test.ts` (10/10 bullets) | VERIFIED | same command — each bullet mapped to its specific OpenAPI path(s), plus a literal re-run of the domain-model diff gate CI runs |
+| `docs/blueprint/implementation_acceptance_checklist_v1.4.md` checkboxes reflect real, evidence-linked status | VERIFIED | file itself — every checked item names the exact test; the one unchecked item ("SLO numbers measured") is honestly left open because no running environment exists to measure |
+| CI runs the full test suite (Phases 1–9) on every push | TEST REQUIRED | `.github/workflows/ci.yml` updated with a `pnpm test:acceptance` step (the RLS step already globbed `full-coverage.test.ts` automatically); same "not yet observed green on GitHub's runners" caveat as every prior phase |
+
 ## What has NOT been built yet
 
 - No live call has been made against a real hosted LLM provider or a real
@@ -180,24 +192,22 @@ marked VERIFIED without the command that proves it.
   at all (only `/policy-decisions`, a different, already-implemented read
   of `policy_decision_records`), so there is no placeholder endpoint to
   wire them into without inventing scope beyond the spec; see ADR 0007 §7.
-- The formal ≥50-case RLS adversarial suite (flagged as a TARGET since
-  Phase 1) and a dedicated `tests/acceptance` directory (build-order item
-  9 in the original scaffold) still don't exist as such — the 5-case RLS
-  smoke suite and the golden-path/integration-wiring suites are the
-  closest present equivalents, but neither was expanded in this phase;
-  see ADR 0007 "Consequences."
-- No production secrets, IaC, or deployment topology (explicitly out of
-  scope per blueprint clause 74 and the scaffold's own "what NOT to build
-  here").
+- No production/staging environment has ever been run, so no SLO number
+  has ever been measured — the one open box in the acceptance checklist's
+  "Evidence discipline" section. Nothing is claimed here because there is
+  nothing yet to measure it against.
 
 ## Next phase
 
-The core system is now functionally complete end-to-end: every build-order
-service exists with real, tested logic, and control-plane-api's endpoints
-actually call through to that logic rather than standing in for it. What
-remains is not new services but hardening and completeness work: expanding
-the RLS adversarial suite toward the originally-scoped ≥50 cases, a
-dedicated `tests/acceptance` directory, a scheduler for the two sweep
-functions, and — whenever real provider/embedding credentials and
-deployment infrastructure become available — exercising every adapter
-against a live endpoint for the first time.
+The system is now functionally complete end-to-end and hardened to the
+level the original implementation scaffold specified: every build-order
+service exists with real, tested logic; control-plane-api's endpoints
+call through to that logic; the RLS adversarial suite covers all 36
+tenant-scoped tables (75 cases); and a dedicated acceptance-test suite
+proves all 24 checklist bullets with real, evidence-linked tests. What
+remains is not more building but operating: a scheduler for the two sweep
+functions (`expirePendingApprovals`, `purgeExpiredWorkingMemory`), and —
+whenever real provider/embedding credentials and deployment
+infrastructure become available — exercising every adapter against a live
+endpoint for the first time and measuring real SLO numbers against a
+running environment.

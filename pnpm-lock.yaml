@@ -7,6 +7,16 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@ai-office/cost-usage-service':
+        specifier: workspace:*
+        version: link:services/cost-usage-service
+      '@ai-office/db':
+        specifier: workspace:*
+        version: link:packages/db
+      '@ai-office/tool-gateway-mcp':
+        specifier: workspace:*
+        version: link:services/tool-gateway-mcp
     devDependencies:
       '@types/js-yaml':
         specifier: ^4.0.9
