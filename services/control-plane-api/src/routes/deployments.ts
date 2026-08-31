@@ -21,6 +21,15 @@ const healthChecker = new HttpHealthChecker();
  * ADR 0004). When a caller does supply one, this endpoint now runs a
  * real health check via @ai-office/deployment-orchestrator immediately
  * after creation.
+ *
+ * Contract rule 9 (docs/blueprint/control_plane_api_v1.4_closure.md):
+ * "Production deployment and agent activation must use explicit approval
+ * state." Agent version activation already enforces this (see
+ * agents.ts's AGENT_ACTIVATE check); a deployment to environment ===
+ * "production" now requires the same thing — an `approval_request_id`
+ * pointing at an APPROVED `DEPLOYMENT_PRODUCTION` approval_requests row.
+ * Any other environment (staging, etc.) is unaffected — `approval_request_id`
+ * stays optional there, unchanged from before.
  */
 deploymentsRouter.post(
   "/deployments",
@@ -48,6 +57,25 @@ deploymentsRouter.post(
             throw ApiError.validation(
               `release_id ${release_id} does not exist. release_registry has no creation endpoint in the v1.4 contract yet — seed it directly for now.`,
             );
+          }
+
+          if (environment === "production") {
+            const approvalRequestId = req.body.approval_request_id;
+            if (!approvalRequestId) {
+              throw ApiError.policyDenied(
+                "Production deployments require an approval_request_id referencing an APPROVED DEPLOYMENT_PRODUCTION approval request.",
+              );
+            }
+            const approval = await client.query(
+              `SELECT decision FROM approval_requests
+               WHERE request_id = $1 AND tenant_id = $2 AND action = 'DEPLOYMENT_PRODUCTION'`,
+              [approvalRequestId, tenantId],
+            );
+            if (approval.rows.length === 0 || approval.rows[0].decision !== "APPROVED") {
+              throw ApiError.policyDenied(
+                `No APPROVED DEPLOYMENT_PRODUCTION approval found for approval_request_id ${approvalRequestId}.`,
+              );
+            }
           }
 
           const deploymentId = generateId("depl");

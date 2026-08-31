@@ -212,6 +212,68 @@ describe("POST /deployments + rollback — real health checks via deployment-orc
   });
 });
 
+describe("POST /deployments — production approval gate (closure contract rule 9)", () => {
+  it("rejects a production deployment with no approval_request_id", async () => {
+    const res = await post("/deployments", {
+      project_id: projectId,
+      release_id: releaseId,
+      environment: "production",
+      strategy: "standard",
+    });
+    assert.equal(res.status, 403);
+    const body = await json(res);
+    assert.equal(body.error_code, "POLICY_ERROR");
+  });
+
+  it("rejects a production deployment referencing an approval that isn't APPROVED yet", async () => {
+    const { rows } = await owner.query(
+      `INSERT INTO approval_requests (request_id, tenant_id, action, risk_level)
+       VALUES ($1, $2, 'DEPLOYMENT_PRODUCTION', 'YELLOW') RETURNING request_id`,
+      [`appr-prod-pending-${runTag}`, tenantId],
+    );
+    const approvalRequestId = rows[0].request_id;
+
+    const res = await post("/deployments", {
+      project_id: projectId,
+      release_id: releaseId,
+      environment: "production",
+      strategy: "standard",
+      approval_request_id: approvalRequestId,
+    });
+    assert.equal(res.status, 403);
+  });
+
+  it("allows a production deployment once a DEPLOYMENT_PRODUCTION approval is APPROVED", async () => {
+    const { rows } = await owner.query(
+      `INSERT INTO approval_requests (request_id, tenant_id, action, risk_level, decision, decided_at)
+       VALUES ($1, $2, 'DEPLOYMENT_PRODUCTION', 'YELLOW', 'APPROVED', now()) RETURNING request_id`,
+      [`appr-prod-approved-${runTag}`, tenantId],
+    );
+    const approvalRequestId = rows[0].request_id;
+
+    const res = await post("/deployments", {
+      project_id: projectId,
+      release_id: releaseId,
+      environment: "production",
+      strategy: "standard",
+      approval_request_id: approvalRequestId,
+    });
+    assert.equal(res.status, 201);
+    const body = await json(res);
+    assert.equal(body.approvalRequestId, approvalRequestId);
+  });
+
+  it("still allows a non-production deployment with no approval at all (unchanged behavior)", async () => {
+    const res = await post("/deployments", {
+      project_id: projectId,
+      release_id: releaseId,
+      environment: "staging",
+      strategy: "standard",
+    });
+    assert.equal(res.status, 201);
+  });
+});
+
 describe("POST /memory/query — real Tier 3 semantic search via memory-service", () => {
   it("returns a pgvector-ranked semantic result once an embedding-provider secret is configured", async () => {
     const { rows } = await owner.query(

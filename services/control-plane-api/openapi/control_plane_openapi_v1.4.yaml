@@ -423,7 +423,14 @@ components:
         release_id: { type: string }
         environment: { type: string }
         strategy: { type: string, enum: [standard, rolling, blue_green, canary] }
-        approval_request_id: { type: string }
+        approval_request_id:
+          type: string
+          description: >
+            Required when environment is "production" — must reference an
+            approval_requests row with action='DEPLOYMENT_PRODUCTION' and
+            decision='APPROVED' (control_plane_api_v1.4_closure.md contract
+            rule 9: "Production deployment and agent activation must use
+            explicit approval state"). Optional for any other environment.
         health_check_url:
           type: string
           format: uri
