@@ -181,12 +181,11 @@ marked VERIFIED without the command that proves it.
 - No live deployment infrastructure exists to health-check — every
   `deployment-orchestrator` test points `HttpHealthChecker` at a local mock
   server, same pattern as every network-touching adapter since Phase 4.
-- `purgeExpiredWorkingMemory` (memory-service Tier 1) is still not wired to
-  anything — Tier 1 working memory has no HTTP surface in the OpenAPI
-  contract to lazily sweep from the way `GET /approvals` now sweeps
-  `expirePendingApprovals` (Phase 7). `expirePendingApprovals` itself is
-  wired (see Phase 7 above), but neither runs on a schedule — both remain
-  correct, tenant-scoped, callable sweeps with no cron behind them.
+- No live cron/systemd/k8s trigger runs `services/scheduler-worker` in
+  this environment (same "no IaC here" posture as everything else) — an
+  operator needs to point one at `pnpm --filter @ai-office/scheduler-worker
+  run sweep` (or run `sweep:loop` directly) with real credentials; see
+  ADR 0009.
 - `policy-engine-service`'s `upsertPolicy`/`listPolicies`/`getPolicy`
   remain library-only — the v1.4 OpenAPI contract has no `/policies` path
   at all (only `/policy-decisions`, a different, already-implemented read
@@ -197,17 +196,32 @@ marked VERIFIED without the command that proves it.
   "Evidence discipline" section. Nothing is claimed here because there is
   nothing yet to measure it against.
 
+## Phase 10 — services/scheduler-worker
+
+| Item | Status | Evidence |
+|---|---|---|
+| `runSweepOnce` sweeps both `expirePendingApprovals` and `purgeExpiredWorkingMemory` for every tenant in one pass | VERIFIED | `pnpm --filter @ai-office/scheduler-worker run test` — a seeded overdue approval and an expired working-memory row for one tenant are both correctly swept; a not-yet-overdue row for a second tenant is left untouched |
+| One tenant's sweep failure doesn't stop the others' | VERIFIED by construction | `runSweepOnce` catches and logs per-tenant, per-function errors rather than throwing past the caller — same house style as `runFullPipeline`/`advanceDeployment` |
+| A second sweep pass is idempotent — already-settled rows aren't disturbed | VERIFIED | same suite — a row already `EXPIRED` by the first pass stays exactly `EXPIRED` after a second pass |
+| `startScheduler` runs on a real interval and genuinely stops when told to | VERIFIED | same command — a real `setInterval`-driven loop (100ms in the test) sweeps an overdue row, then `stop()` is proven to actually halt further ticks: a new overdue row inserted after `stop()` is still untouched after another full interval window |
+| CLI has both a one-shot mode and a long-running loop mode, matching agent-factory's `cli.ts` precedent | VERIFIED | `pnpm --filter @ai-office/scheduler-worker run sweep` — real run against local Postgres, exit code 0, logs `{tenantsSwept, approvalsExpired, workingMemoryPurged}` |
+| Listing tenants uses the owner role; every actual sweep write still goes through the app role's RLS-enforced `withTenantTransaction` | VERIFIED by construction | `listTenantIds` only ever runs one `SELECT tenant_id FROM organizations` on the owner connection; `expirePendingApprovals`/`purgeExpiredWorkingMemory` are unmodified from Phase 6/7, both still app-role-scoped — see ADR 0009 §2 |
+| CI runs the full test suite (Phases 1–10) on every push | TEST REQUIRED | `.github/workflows/ci.yml` updated with a `scheduler-worker` test step; same "not yet observed green on GitHub's runners" caveat as every prior phase |
+
 ## Next phase
 
-The system is now functionally complete end-to-end and hardened to the
-level the original implementation scaffold specified: every build-order
-service exists with real, tested logic; control-plane-api's endpoints
-call through to that logic; the RLS adversarial suite covers all 36
-tenant-scoped tables (75 cases); and a dedicated acceptance-test suite
-proves all 24 checklist bullets with real, evidence-linked tests. What
-remains is not more building but operating: a scheduler for the two sweep
-functions (`expirePendingApprovals`, `purgeExpiredWorkingMemory`), and —
-whenever real provider/embedding credentials and deployment
-infrastructure become available — exercising every adapter against a live
-endpoint for the first time and measuring real SLO numbers against a
-running environment.
+The system is now functionally complete end-to-end, hardened to the level
+the original implementation scaffold specified, and self-operating for
+the two housekeeping sweeps that used to depend on an incidental request
+arriving: every build-order service exists with real, tested logic;
+control-plane-api's endpoints call through to that logic; the RLS
+adversarial suite covers all 36 tenant-scoped tables (75 cases); a
+dedicated acceptance-test suite proves all 24 checklist bullets; and
+`scheduler-worker` keeps `expirePendingApprovals`/`purgeExpiredWorkingMemory`
+running on a real schedule rather than only when someone happens to hit
+`GET /approvals`. What remains is not more building but operating: wiring
+a real cron/systemd/k8s trigger to `scheduler-worker` in an actual
+deployment, and — whenever real provider/embedding credentials and
+deployment infrastructure become available — exercising every adapter
+against a live endpoint for the first time and measuring real SLO numbers
+against a running environment.

@@ -95,3 +95,6 @@ jobs:
 
       - name: Acceptance suite (one file per implementation_acceptance_checklist_v1.4.md section)
         run: pnpm test:acceptance
+
+      - name: scheduler-worker tests (cross-tenant sweep pass + real setInterval loop)
+        run: pnpm --filter @ai-office/scheduler-worker run test

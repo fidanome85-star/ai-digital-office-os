@@ -5,26 +5,30 @@ model router, workflow engine, and policy engine for running governed AI
 agents inside an organization. Specification: `docs/blueprint/` (v1.4
 consolidated master + integrity review + acceptance checklist).
 
-**Status: Phase 9 of 9 complete — functionally complete and hardened
-end-to-end.** See `PHASE_STATUS.md` for exactly what is built, tested and
-verified versus what is still a TARGET. The control plane is a real,
-tested, RLS-enforced HTTP API; agent specifications move through a real,
-offline-first, policy-gated lifecycle pipeline; real provider adapters and
-a real MCP client exist, tested against local mock servers;
-workflow-engine durably chains them — model call → tool call → artifact —
-into one replayable, resumable, pausable multi-step flow; all eight
-build-order services exist with real, tested logic (tiered memory with
-real pgvector semantic search, real budget-tier cost tracking,
+**Status: Phase 9 of 9 (the original scaffold's build order) complete,
+plus a Phase 10 hardening addition — functionally complete, hardened, and
+self-operating end-to-end.** See `PHASE_STATUS.md` for exactly what is
+built, tested and verified versus what is still a TARGET. The control
+plane is a real, tested, RLS-enforced HTTP API; agent specifications move
+through a real, offline-first, policy-gated lifecycle pipeline; real
+provider adapters and a real MCP client exist, tested against local mock
+servers; workflow-engine durably chains them — model call → tool call →
+artifact — into one replayable, resumable, pausable multi-step flow; all
+eight build-order services exist with real, tested logic (tiered memory
+with real pgvector semantic search, real budget-tier cost tracking,
 health-checked deploy/rollback, policy CRUD + approval expiry) and are
 wired into control-plane-api's endpoints (`/costs`, `/memory/query`,
 `/deployments*`, `/approvals`), not standing in for them; the RLS
 adversarial suite covers all 36 tenant-scoped tables with 75 real cases;
-and a dedicated `tests/acceptance` suite proves all 24 bullets in the
-implementation acceptance checklist with real, evidence-linked tests. No
-live API key, MCP server, or deployment infrastructure has been wired in
-yet (a deliberate choice, see `docs/decisions/0004`) — what's left is
-operating the system against real credentials/infrastructure, not
-building more of it. See `PHASE_STATUS.md`'s "Next phase."
+a dedicated `tests/acceptance` suite proves all 24 bullets in the
+implementation acceptance checklist; and `services/scheduler-worker` keeps
+the two housekeeping sweeps (`expirePendingApprovals`,
+`purgeExpiredWorkingMemory`) running on a real schedule rather than only
+when an incidental request triggers them. No live API key, MCP server, or
+deployment infrastructure has been wired in yet (a deliberate choice, see
+`docs/decisions/0004`) — what's left is operating the system against real
+credentials/infrastructure, not building more of it. See
+`PHASE_STATUS.md`'s "Next phase."
 
 ## Build order
 
@@ -41,6 +45,7 @@ order"), one phase at a time, each verified before the next starts:
 7. **`services/workflow-engine`** — ✅ done (durable, replayable, resumable, pausable multi-step execution)
 8. **`services/memory-service`**, **`services/cost-usage-service`**, **`services/deployment-orchestrator`**, **`services/policy-engine-service`** — ✅ done (tiered memory + real pgvector semantic search, real budget-tier cost tracking, health-checked deploy/rollback, policy CRUD + approval expiry), and ✅ wired into control-plane-api's `/costs`, `/memory/query`, `/deployments*`, `/approvals` endpoints (Phase 7 — see `docs/decisions/0007`)
 9. **`tests/rls-adversarial`** (full ≥50-case suite), **`tests/acceptance`** — ✅ done (75-case RLS adversarial suite across all 36 tenant-scoped tables; 21-case acceptance suite covering all 24 checklist bullets — see `docs/decisions/0008`)
+10. **`services/scheduler-worker`** *(beyond the original 9-item scaffold — an operational hardening addition, not a numbered build-order item)* — ✅ done: a real `setInterval`-driven scheduler running `expirePendingApprovals` and `purgeExpiredWorkingMemory` across every tenant on a schedule, plus a one-shot CLI mode — see `docs/decisions/0009`
 
 ## Local development
 
@@ -66,6 +71,7 @@ pnpm --filter @ai-office/memory-service run test         # tiered memory + real 
 pnpm --filter @ai-office/cost-usage-service run test      # real budget_status against budget_tiers
 pnpm --filter @ai-office/deployment-orchestrator run test # health-checked advance/rollback vs. mock server
 pnpm --filter @ai-office/policy-engine-service run test   # policy CRUD + approval expiry sweep
+pnpm --filter @ai-office/scheduler-worker run test        # cross-tenant sweep pass + real setInterval loop
 pnpm test:acceptance           # all 24 implementation_acceptance_checklist_v1.4.md bullets, real assertions
 
 # run the control plane locally:
@@ -74,6 +80,10 @@ AUTH_JWT_ISSUER=... AUTH_JWT_AUDIENCE=... AUTH_JWKS_URI=... \
 
 # advance one agent through the automated pipeline (DRAFT -> ... -> APPROVED):
 pnpm --filter @ai-office/agent-factory run process -- <tenantId> <agentId>
+
+# run the housekeeping sweeps once, or as a long-running scheduler:
+pnpm --filter @ai-office/scheduler-worker run sweep       # one pass across every tenant, then exits
+pnpm --filter @ai-office/scheduler-worker run sweep:loop  # SWEEP_INTERVAL_MS (default 300000ms), runs until SIGTERM/SIGINT
 ```
 
 To point `services/model-router-gateway` at a real provider instead of
