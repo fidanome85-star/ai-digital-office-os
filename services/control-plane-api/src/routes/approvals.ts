@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { getCurrentTenantId, requireCurrentPrincipal } from "@ai-office/auth";
+import { expirePendingApprovals } from "@ai-office/policy-engine-service";
 import { ah } from "../async-handler.js";
-import { withRequestTenant } from "../db.js";
+import { pool, withRequestTenant } from "../db.js";
 import { withIdempotentWrite } from "../idempotency.js";
 import { ApiError } from "../errors.js";
 import { generateId } from "../ids.js";
@@ -46,6 +47,15 @@ approvalsRouter.get(
   "/approvals",
   ah(async (req, res) => {
     const riskLevel = typeof req.query["risk_level"] === "string" ? req.query["risk_level"] : undefined;
+    const tenantId = getCurrentTenantId()!;
+    // Real, tenant-scoped sweep via @ai-office/policy-engine-service — an
+    // approval past its expires_at with no human decision is finally
+    // flipped to EXPIRED (a value the OpenAPI ApprovalRecord.decision enum
+    // has always defined but nothing ever set — see docs/decisions/0006
+    // §6, 0007) before this list is built. Lazy, at-read-time expiry,
+    // same "no cron needed for correctness" pattern as memory-service's
+    // working-memory TTL.
+    await expirePendingApprovals(pool, tenantId);
     const rows = await withRequestTenant(async (client) => {
       const { rows } = riskLevel
         ? await client.query(

@@ -5,18 +5,24 @@ model router, workflow engine, and policy engine for running governed AI
 agents inside an organization. Specification: `docs/blueprint/` (v1.4
 consolidated master + integrity review + acceptance checklist).
 
-**Status: Phase 6 of 9 complete.** See `PHASE_STATUS.md` for exactly what
-is built, tested and verified versus what is still a TARGET. The control
-plane is a real, tested, RLS-enforced HTTP API; agent specifications move
-through a real, offline-first, policy-gated lifecycle pipeline; real
-provider adapters and a real MCP client exist, tested against local mock
-servers; workflow-engine durably chains them — model call → tool call →
-artifact — into one replayable, resumable, pausable multi-step flow; and
-all eight build-order services now exist: tiered memory with real pgvector
-semantic search, real budget-tier cost tracking, health-checked deploy/
-rollback, and a policy-engine-service handling policy CRUD and approval
-expiry. No live API key or MCP server has been wired in yet (a deliberate
-choice, see `docs/decisions/0004`).
+**Status: Phase 7 of 9 complete — core system functionally complete
+end-to-end.** See `PHASE_STATUS.md` for exactly what is built, tested and
+verified versus what is still a TARGET. The control plane is a real,
+tested, RLS-enforced HTTP API; agent specifications move through a real,
+offline-first, policy-gated lifecycle pipeline; real provider adapters and
+a real MCP client exist, tested against local mock servers;
+workflow-engine durably chains them — model call → tool call → artifact —
+into one replayable, resumable, pausable multi-step flow; all eight
+build-order services exist with real, tested logic (tiered memory with
+real pgvector semantic search, real budget-tier cost tracking,
+health-checked deploy/rollback, policy CRUD + approval expiry); and
+control-plane-api's endpoints now actually call through to that logic —
+`GET /costs`, `POST /memory/query`, `POST /deployments`(`/rollback`), and
+`GET /approvals` are wired to the real services, not standing in for them.
+No live API key, MCP server, or deployment infrastructure has been wired
+in yet (a deliberate choice, see `docs/decisions/0004`). What's left
+(Phases 8–9) is hardening: the formal ≥50-case RLS adversarial suite and a
+dedicated acceptance-test directory — see `PHASE_STATUS.md`'s "Next phase."
 
 ## Build order
 
@@ -31,8 +37,8 @@ order"), one phase at a time, each verified before the next starts:
 5. **`services/agent-factory`** — ✅ done (DRAFT → SANDBOX → TESTED → EVALUATED → APPROVED)
 6. **`services/model-router-gateway`**, **`services/tool-gateway-mcp`** — ✅ done (adapters/client tested against mock servers, no live provider/MCP server wired in yet)
 7. **`services/workflow-engine`** — ✅ done (durable, replayable, resumable, pausable multi-step execution)
-8. **`services/memory-service`**, **`services/cost-usage-service`**, **`services/deployment-orchestrator`**, **`services/policy-engine-service`** — ✅ done (tiered memory + real pgvector semantic search, real budget-tier cost tracking, health-checked deploy/rollback, policy CRUD + approval expiry)
-9. **`tests/rls-adversarial`** (full suite), **`tests/acceptance`** — partial (smoke-level RLS test + control-plane-api golden path + agent-factory/model-router/tool-gateway/workflow-engine integration tests)
+8. **`services/memory-service`**, **`services/cost-usage-service`**, **`services/deployment-orchestrator`**, **`services/policy-engine-service`** — ✅ done (tiered memory + real pgvector semantic search, real budget-tier cost tracking, health-checked deploy/rollback, policy CRUD + approval expiry), and ✅ wired into control-plane-api's `/costs`, `/memory/query`, `/deployments*`, `/approvals` endpoints (Phase 7 — see `docs/decisions/0007`)
+9. **`tests/rls-adversarial`** (full ≥50-case suite), **`tests/acceptance`** — partial (smoke-level 5-case RLS test + control-plane-api golden path/integration-wiring + agent-factory/model-router/tool-gateway/workflow-engine integration tests)
 
 ## Local development
 
@@ -49,7 +55,7 @@ pnpm --filter @ai-office/auth run test
 pnpm --filter @ai-office/observability run test
 pnpm --filter @ai-office/policy-engine run test
 pnpm test:rls-adversarial      # requires APP_DATABASE_URL (the ai_office_app role, not the owner)
-pnpm --filter @ai-office/control-plane-api run test   # golden path + OpenAPI coverage + tenant isolation
+pnpm --filter @ai-office/control-plane-api run test   # golden path + OpenAPI coverage + tenant isolation + Phase 7 wiring
 pnpm --filter @ai-office/agent-factory run test        # lifecycle pipeline, real Postgres
 pnpm --filter @ai-office/model-router-gateway run test # provider adapters vs. mock servers + real execution
 pnpm --filter @ai-office/tool-gateway-mcp run test      # MCP client vs. mock server + binding/policy enforcement
@@ -74,7 +80,16 @@ To point `services/model-router-gateway` at a real provider instead of
 set `YOUR_VAR_NAME` in the environment — no code changes needed (see
 `docs/decisions/0004-phase-4-implementation-choices.md`). The same
 `SecretResolver` seam is used by `services/memory-service`'s
-`OpenAiEmbeddingAdapter` for real `/v1/embeddings` calls.
+`OpenAiEmbeddingAdapter` for real `/v1/embeddings` calls; to enable Tier 3
+semantic search on `POST /memory/query`, add a `secrets_vault_references`
+row with `secret_name = 'memory-embedding-provider'` and
+`vault_path = 'env:YOUR_VAR_NAME'` (see `docs/decisions/0007`).
+
+To let `POST /deployments` and `/deployments/{id}/rollback` run a real
+HTTP health check instead of leaving a deployment at `IN_PROGRESS` with
+nothing to verify, pass an optional `health_check_url` in the create
+request body pointing at a real health endpoint — see
+`docs/decisions/0007-phase-7-integration-choices.md`.
 
 If Docker isn't available in your environment, point `DATABASE_URL` /
 `APP_DATABASE_URL` at any local Postgres 16+ with the `pgvector` and

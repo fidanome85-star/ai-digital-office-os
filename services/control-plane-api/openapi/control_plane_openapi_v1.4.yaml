@@ -383,6 +383,18 @@ components:
         currency: { type: string }
         budget_status: { type: string, enum: [OK, WARNING, SOFT_LIMIT, HARD_LIMIT] }
         breakdown_by_provider: { type: object }
+        budget_tier:
+          type: object
+          nullable: true
+          description: >
+            The budget_tiers row this summary was judged against, or null
+            when the tenant has none configured (budget_status is then
+            always OK — an honest "nothing to compare against," not a
+            fabricated pass). Added in the Phase 7 integration pass; see
+            docs/decisions/0007.
+          properties:
+            soft_limit: { type: number }
+            hard_limit: { type: number }
 
     ToolRecord:
       type: object
@@ -412,6 +424,15 @@ components:
         environment: { type: string }
         strategy: { type: string, enum: [standard, rolling, blue_green, canary] }
         approval_request_id: { type: string }
+        health_check_url:
+          type: string
+          format: uri
+          description: >
+            Optional. When supplied, POST /deployments and
+            /deployments/{id}/rollback run a real HTTP health check against
+            this URL (services/deployment-orchestrator) instead of leaving
+            the deployment at IN_PROGRESS with nothing to verify — added in
+            the Phase 7 integration pass (see docs/decisions/0007).
 
     Deployment:
       allOf:

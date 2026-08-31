@@ -10,9 +10,13 @@
   },
   "dependencies": {
     "@ai-office/auth": "workspace:*",
+    "@ai-office/cost-usage-service": "workspace:*",
     "@ai-office/db": "workspace:*",
+    "@ai-office/deployment-orchestrator": "workspace:*",
     "@ai-office/domain-model": "workspace:*",
+    "@ai-office/memory-service": "workspace:*",
     "@ai-office/observability": "workspace:*",
+    "@ai-office/policy-engine-service": "workspace:*",
     "express": "^4.19.2",
     "pg": "^8.12.0"
   },

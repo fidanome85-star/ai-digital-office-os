@@ -1,15 +1,19 @@
 import { Router } from "express";
 import { getCurrentTenantId } from "@ai-office/auth";
+import { getCostSummary } from "@ai-office/cost-usage-service";
 import { ah } from "../async-handler.js";
-import { withRequestTenant } from "../db.js";
+import { pool } from "../db.js";
 
 export const costsRouter = Router();
 
 /**
- * No budget-tier table exists in the schema yet (the blueprint's "budget
- * governance" concept has no persisted definition to compare consumption
- * against), so budget_status is always OK here — a real threshold
- * comparison needs that table added in a later phase, not fabricated now.
+ * Real budget_status against budget_tiers (closes the Phase 2 placeholder
+ * that always returned "OK" because no budget definition existed to
+ * compare consumption against — see docs/decisions/0006 §2, 0007).
+ * Delegates entirely to @ai-office/cost-usage-service's getCostSummary
+ * rather than re-implementing the aggregation query here; a tenant with no
+ * budget_tiers row configured still gets "OK" back — an honest "nothing to
+ * compare against," not a fabricated pass.
  */
 costsRouter.get(
   "/costs",
@@ -17,37 +21,19 @@ costsRouter.get(
     const { from, to } = req.query as Record<string, string | undefined>;
     const periodStart = from ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const periodEnd = to ?? new Date().toISOString();
+    const tenantId = getCurrentTenantId()!;
 
-    const summary = await withRequestTenant(async (client) => {
-      const totalRes = await client.query(
-        "SELECT COALESCE(SUM(actual_cost), 0) AS total, MAX(currency) AS currency FROM usage_events WHERE event_time BETWEEN $1 AND $2",
-        [periodStart, periodEnd],
-      );
-      const byProviderRes = await client.query(
-        `SELECT provider_id, COALESCE(SUM(actual_cost), 0) AS cost
-         FROM usage_events WHERE event_time BETWEEN $1 AND $2 AND provider_id IS NOT NULL
-         GROUP BY provider_id`,
-        [periodStart, periodEnd],
-      );
-      const breakdown: Record<string, number> = {};
-      for (const row of byProviderRes.rows) {
-        breakdown[row.provider_id as string] = Number(row.cost);
-      }
-      return {
-        total: Number(totalRes.rows[0].total),
-        currency: totalRes.rows[0].currency ?? "USD",
-        breakdown,
-      };
-    });
+    const summary = await getCostSummary(pool, tenantId, { from: periodStart, to: periodEnd });
 
     res.status(200).json({
-      tenantId: getCurrentTenantId(),
+      tenantId,
       periodStart,
       periodEnd,
-      totalCost: summary.total,
+      totalCost: summary.totalCost,
       currency: summary.currency,
-      budgetStatus: "OK",
-      breakdownByProvider: summary.breakdown,
+      budgetStatus: summary.budgetStatus,
+      breakdownByProvider: summary.breakdownByProvider,
+      budgetTier: summary.budgetTier,
     });
   }),
 );

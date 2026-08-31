@@ -117,6 +117,21 @@ marked VERIFIED without the command that proves it.
 | `expirePendingApprovals` sweeps overdue undecided approvals to `EXPIRED` (closes a real OpenAPI enum gap — `EXPIRED` existed in `ApprovalRecord.decision` but nothing ever set it) | VERIFIED | same suite — an expired-but-undecided row flips to `EXPIRED`; a still-pending row and an already-`APPROVED` row are both left untouched by the same sweep |
 | CI runs the full test suite (Phases 1–6) on every push | TEST REQUIRED | `.github/workflows/ci.yml` updated with all four new services' test steps; same "not yet observed green on GitHub's runners" caveat as every prior phase (see note at the bottom) |
 
+## Phase 7 — control-plane-api integration pass
+
+| Item | Status | Evidence |
+|---|---|---|
+| `GET /costs` calls `@ai-office/cost-usage-service`'s `getCostSummary` for real, not inline SQL | VERIFIED | `pnpm --filter @ai-office/control-plane-api run test` — `integration-wiring.test.ts` seeds a real `budget_tiers` row and asserts the live HTTP response progresses OK → WARNING → SOFT_LIMIT → HARD_LIMIT as `usage_events` grow |
+| `POST /memory/query` calls `@ai-office/memory-service`'s `recallFacts` (Tier 2) unconditionally | VERIFIED | same suite — a plain-text fact is returned with no embedding secret configured, matching unchanged Phase 2 behavior |
+| `POST /memory/query` also calls real `semanticSearch` (Tier 3) when a tenant embedding secret is configured | VERIFIED against mock server | same suite — a `secrets_vault_references` row (`secret_name='memory-embedding-provider'`) plus a mock embeddings server drives a real pgvector-ranked result with cosine similarity > 0.99, proving the actual query path ran, not a stub |
+| `POST /deployments` runs a real HTTP health check via `@ai-office/deployment-orchestrator` when `health_check_url` is supplied | VERIFIED against mock server | same suite — a deployment created with a `health_check_url` comes back `HEALTHY` in the same response, and the DB row reflects it |
+| `POST /deployments/{id}/rollback` runs a real health-checked rollback (only marks the original `ROLLED_BACK` once the replacement is confirmed healthy) when `health_check_url` was recorded | VERIFIED against mock server | same suite — asserts the original deployment's row flips to `ROLLED_BACK` only after the new deployment's mock health check returns 200 |
+| Rollback without a recorded `health_check_url` still falls back to the original unchecked Phase 2 behavior | VERIFIED | same suite — unchanged 202 response, no regression |
+| `GET /approvals` sweeps overdue undecided approvals to `EXPIRED` via `@ai-office/policy-engine-service` before listing | VERIFIED | same suite — an approval seeded with `expires_at` in the past and `decision IS NULL` is `EXPIRED` in the database and absent from the returned pending list, both asserted directly |
+| `health_check_url` migration (0025) + additive OpenAPI schema fields (`DeploymentCreateRequest.health_check_url`, `CostSummary.budget_tier`) | VERIFIED | `pnpm db:migrate` — 26/26 migrations applied; domain-model regenerated (44th field, `DeploymentRegistry.healthCheckUrl`) |
+| No regression in existing golden-path / OpenAPI-coverage / tenant-isolation suites | VERIFIED | `pnpm --filter @ai-office/control-plane-api run test` — 37/37 passing (30 pre-existing + 7 new) |
+| CI runs the full test suite (Phases 1–7) on every push | TEST REQUIRED | `.github/workflows/ci.yml`'s existing `control-plane-api` test step already globs `test/**/*.test.ts`, so it picks up `integration-wiring.test.ts` with no CI file changes needed; same "not yet observed green on GitHub's runners" caveat as every prior phase |
+
 ## What has NOT been built yet
 
 - No live call has been made against a real hosted LLM provider or a real
@@ -154,24 +169,35 @@ marked VERIFIED without the command that proves it.
 - No live deployment infrastructure exists to health-check — every
   `deployment-orchestrator` test points `HttpHealthChecker` at a local mock
   server, same pattern as every network-touching adapter since Phase 4.
-- Neither `expirePendingApprovals` nor `purgeExpiredWorkingMemory` is wired
-  to a scheduler — both are correct, tenant-scoped, callable sweeps, but
-  nothing in this repo invokes them periodically yet (see ADR 0006 §3).
-- `services/memory-service`, `services/cost-usage-service`,
-  `services/deployment-orchestrator`, and `services/policy-engine-service`
-  are library packages only — none of them expose an HTTP API of their own
-  yet. control-plane-api's Phase 2 endpoints (`/memory/*`, `/costs`,
-  `/deployments/*`, `/policies` if added) would need to be wired to call
-  into these packages to expose the new functionality over HTTP; that
-  wiring has not been done in this phase.
+- `purgeExpiredWorkingMemory` (memory-service Tier 1) is still not wired to
+  anything — Tier 1 working memory has no HTTP surface in the OpenAPI
+  contract to lazily sweep from the way `GET /approvals` now sweeps
+  `expirePendingApprovals` (Phase 7). `expirePendingApprovals` itself is
+  wired (see Phase 7 above), but neither runs on a schedule — both remain
+  correct, tenant-scoped, callable sweeps with no cron behind them.
+- `policy-engine-service`'s `upsertPolicy`/`listPolicies`/`getPolicy`
+  remain library-only — the v1.4 OpenAPI contract has no `/policies` path
+  at all (only `/policy-decisions`, a different, already-implemented read
+  of `policy_decision_records`), so there is no placeholder endpoint to
+  wire them into without inventing scope beyond the spec; see ADR 0007 §7.
+- The formal ≥50-case RLS adversarial suite (flagged as a TARGET since
+  Phase 1) and a dedicated `tests/acceptance` directory (build-order item
+  9 in the original scaffold) still don't exist as such — the 5-case RLS
+  smoke suite and the golden-path/integration-wiring suites are the
+  closest present equivalents, but neither was expanded in this phase;
+  see ADR 0007 "Consequences."
+- No production secrets, IaC, or deployment topology (explicitly out of
+  scope per blueprint clause 74 and the scaffold's own "what NOT to build
+  here").
 
 ## Next phase
 
-All eight build-order services from the implementation scaffold now exist
-with real, tested logic. What remains is integration work, not new
-services: wiring control-plane-api's existing route handlers to actually
-call into memory-service/cost-usage-service/deployment-orchestrator/
-policy-engine-service instead of their Phase 2 placeholders, adding a
-scheduler for the two sweep functions, and — whenever real provider
-credentials become available — exercising the model/embedding/MCP adapters
-against live endpoints for the first time.
+The core system is now functionally complete end-to-end: every build-order
+service exists with real, tested logic, and control-plane-api's endpoints
+actually call through to that logic rather than standing in for it. What
+remains is not new services but hardening and completeness work: expanding
+the RLS adversarial suite toward the originally-scoped ≥50 cases, a
+dedicated `tests/acceptance` directory, a scheduler for the two sweep
+functions, and — whenever real provider/embedding credentials and
+deployment infrastructure become available — exercising every adapter
+against a live endpoint for the first time.

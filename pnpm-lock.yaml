@@ -148,15 +148,27 @@ importers:
       '@ai-office/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@ai-office/cost-usage-service':
+        specifier: workspace:*
+        version: link:../cost-usage-service
       '@ai-office/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@ai-office/deployment-orchestrator':
+        specifier: workspace:*
+        version: link:../deployment-orchestrator
       '@ai-office/domain-model':
         specifier: workspace:*
         version: link:../../packages/domain-model
+      '@ai-office/memory-service':
+        specifier: workspace:*
+        version: link:../memory-service
       '@ai-office/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@ai-office/policy-engine-service':
+        specifier: workspace:*
+        version: link:../policy-engine-service
       express:
         specifier: ^4.19.2
         version: 4.22.2

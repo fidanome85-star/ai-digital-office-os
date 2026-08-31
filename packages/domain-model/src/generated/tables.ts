@@ -220,6 +220,7 @@ export interface DeploymentRegistry {
   rollbackTarget: string | null;
   startedAt: string | null;
   completedAt: string | null;
+  healthCheckUrl: string | null;
 }
 
 export interface FeatureFlags {
